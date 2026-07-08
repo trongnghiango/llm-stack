@@ -60,3 +60,9 @@ docker compose logs -f
 # Xem trạng thái hoạt động của các container
 docker compose ps
 ```
+
+### 🔄 Cách đồng bộ toàn bộ Available Models từ cf-ai-proxy lên UI 9router:
+1. Đăng nhập vào UI 9router (http://localhost:20128) bằng mật khẩu `llmstack2026`.
+2. Vào mục **Providers**, kéo xuống phần Custom Provider **`CF-AI-PROXY-MAIN`**.
+3. Tại phần **Available Models**, click vào nút **`Import from /models`** ở góc phải.
+4. Hệ thống sẽ tự động fetch danh sách từ `http://cf-ai-proxy:20127/v1/models` và nạp đầy đủ 9 model vào giao diện của bạn.

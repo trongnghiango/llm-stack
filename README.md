@@ -83,8 +83,15 @@ Trong `~/.claude/settings.json`:
 
 Truy cập http://localhost:20128 để quản lý providers, models, và combos.
 
-**Password mặc định**: `llmstack2026`  
+**Mật khẩu mặc định**: `llmstack2026`  
 *(Hash được lưu trong `data/9router/db/init.sql` – đổi trước khi production)*
+
+### 🔄 Cách đồng bộ toàn bộ Available Models từ cf-ai-proxy:
+1. Đăng nhập vào UI 9router (http://localhost:20128).
+2. Vào mục **Providers**, kéo xuống phần Custom Provider **`CF-AI-PROXY-MAIN`**.
+3. Tại phần **Available Models**, click vào nút **`Import from /models`** ở góc phải.
+4. Hệ thống sẽ tự động fetch danh sách từ `http://cf-ai-proxy:20127/v1/models` và nạp đầy đủ 9 model được khai báo trong `models.csv` vào giao diện của bạn.
+
 
 ## Available Models (qua cf-ai-proxy)
 
