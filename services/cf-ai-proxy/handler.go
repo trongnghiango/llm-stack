@@ -347,26 +347,12 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 					argsMap = am
 				}
 
-				// Thực thi tool nội bộ và trả về tool_result
-				log.Printf("[🔧 Tool Execute] name=%s id=%s", name, id)
-				resultStr, toolErr := h.runLocalTool(name, argsMap)
-				if toolErr != nil {
-					log.Printf("[⚠️ Tool Error] %s: %v", name, toolErr)
-					resultStr = fmt.Sprintf("Error: %v", toolErr)
-				}
-
-				// Gửi tool_use block (để client biết tool nào đã được gọi)
+				// Gửi tool_use block (để client biết tool nào đã được gọi và tự thực thi)
 				content = append(content, map[string]interface{}{
 					"type":  "tool_use",
 					"id":    id,
 					"name":  name,
 					"input": argsMap,
-				})
-				// Gửi tool_result block chứa kết quả thực thi
-				content = append(content, map[string]interface{}{
-					"type":        "tool_result",
-					"tool_use_id": id,
-					"content":     resultStr,
 				})
 			}
 		}
@@ -391,24 +377,11 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 				argsMap = am
 			}
 
-			// Thực thi tool nội bộ
-			log.Printf("[🔧 Tool Execute XML] name=%s id=%s", name, id)
-			resultStr, toolErr := h.runLocalTool(name, argsMap)
-			if toolErr != nil {
-				log.Printf("[⚠️ Tool Error XML] %s: %v", name, toolErr)
-				resultStr = fmt.Sprintf("Error: %v", toolErr)
-			}
-
 			content = append(content, map[string]interface{}{
 				"type":  "tool_use",
 				"id":    id,
 				"name":  name,
 				"input": argsMap,
-			})
-			content = append(content, map[string]interface{}{
-				"type":        "tool_result",
-				"tool_use_id": id,
-				"content":     resultStr,
 			})
 		}
 	} else {
@@ -694,43 +667,6 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 					tbstBytes, _ := json.Marshal(toolBlockStop)
 					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
 
-					// --- Thực thi tool và gửi tool_result block ---
-					log.Printf("[🔧 Tool Execute Stream] name=%s id=%s", name, id)
-					resultStr, toolErr := h.runLocalTool(name, argsMap)
-					if toolErr != nil {
-						log.Printf("[⚠️ Tool Error Stream] %s: %v", name, toolErr)
-						resultStr = fmt.Sprintf("Error: %v", toolErr)
-					}
-
-					resultBlockStart := map[string]interface{}{
-						"type":  "content_block_start",
-						"index": idx + 2,
-						"content_block": map[string]interface{}{
-							"type":        "tool_result",
-							"tool_use_id": id,
-							"content":     "",
-						},
-					}
-					rbsBytes, _ := json.Marshal(resultBlockStart)
-					fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(rbsBytes))
-
-					resultBlockDelta := map[string]interface{}{
-						"type":  "content_block_delta",
-						"index": idx + 2,
-						"delta": map[string]interface{}{
-							"type": "text_delta",
-							"text": resultStr,
-						},
-					}
-					rbdBytes, _ := json.Marshal(resultBlockDelta)
-					fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(rbdBytes))
-
-					resultBlockStop := map[string]interface{}{
-						"type":  "content_block_stop",
-						"index": idx + 2,
-					}
-					rbstBytes, _ := json.Marshal(resultBlockStop)
-					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(rbstBytes))
 				}
 			}
 		}

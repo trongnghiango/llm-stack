@@ -80,15 +80,12 @@ services:
     volumes:
       # Mount toàn bộ data dir (SQLite DB, logs, auth...)
       - ./data/9router:/app/data
-      # Mount init script vào entrypoint wrapper
-      - ./scripts/9router-init.sh:/entrypoint-init.sh:ro
     environment:
       - TZ=${TZ:-Asia/Ho_Chi_Minh}
       - PORT=20128
       - HOSTNAME=0.0.0.0
       - DATA_DIR=/app/data
       - NODE_ENV=production
-    entrypoint: ["/bin/sh", "/entrypoint-init.sh"]
     depends_on:
       cf-ai-proxy:
         condition: service_started
@@ -112,6 +109,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:20129:20129"   # Chỉ bind localhost – Claude Code dùng
+    environment:
+      - BIND_ADDR=0.0.0.0
     volumes:
       # Mount config để edit không cần rebuild
       - ./services/claude-proxy/config.json:/app/config.json:ro
