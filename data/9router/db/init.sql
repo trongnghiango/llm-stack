@@ -178,7 +178,7 @@ INSERT OR IGNORE INTO providerNodes (id, type, name, data, createdAt, updatedAt)
   'CF-AI-PROXY',
   json_object(
     'prefix',   'cf-ai-proxy',
-    'baseUrl',  'http://cf-ai-proxy:3000/v1'
+    'baseUrl',  'http://cf-ai-proxy:20127/v1'
   ),
   datetime('now'),
   datetime('now')
@@ -204,7 +204,7 @@ INSERT OR IGNORE INTO providerConnections (
     'testStatus',            'unknown',
     'providerSpecificData',  json_object(
       'prefix',    'cf-ai-proxy',
-      'baseUrl',   'http://cf-ai-proxy:3000/v1',
+      'baseUrl',   'http://cf-ai-proxy:20127/v1',
       'nodeName',  'CF-AI-PROXY-MAIN',
       'connectionProxyEnabled', 0,
       'connectionProxyUrl', '',

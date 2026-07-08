@@ -5,7 +5,7 @@
 #   Claude Code (host:20129)
 #     → claude-proxy  (20129)  [model rewrite: swe.* → ka.*]
 #     → 9router       (20128)  [LLM router / load balancer]
-#     → cf-ai-proxy   (3000)   [Anthropic ↔ Cloudflare CF format]
+#     → cf-ai-proxy   (20127)  [Anthropic ↔ Cloudflare CF format]
 #     → Cloudflare Workers AI
 #         + Redis (session/quota storage)
 # =============================================================================
@@ -58,9 +58,9 @@ services:
     # Không expose port ra ngoài – chỉ 9router cần gọi vào
     # Uncomment dòng dưới nếu muốn test trực tiếp
     # ports:
-    #   - "127.0.0.1:3000:3000"
+    #   - "127.0.0.1:20127:20127"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health 2>/dev/null || exit 0"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:20127/health 2>/dev/null || exit 0"]
       interval: 15s
       timeout: 5s
       retries: 3

@@ -20,7 +20,7 @@ COPY --from=builder /bin/cf-ai-proxy ./cf-ai-proxy
 # CSV files are mounted at runtime via docker-compose volumes
 # accounts.csv và models.csv sẽ được mount từ host
 
-EXPOSE 3000
+EXPOSE 20127
 ENV GIN_MODE=release
 
 CMD ["./cf-ai-proxy"]

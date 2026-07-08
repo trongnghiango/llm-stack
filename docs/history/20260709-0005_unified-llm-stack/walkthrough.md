@@ -11,14 +11,14 @@ Chúng ta đã hoàn thành việc tái cấu trúc lớn và hợp nhất 3 ser
 - **Docker Compose**: Tạo `docker-compose.yml` định nghĩa mạng nội bộ `llm-net`, liên kết 4 dịch vụ:
   1. `claude-proxy` (port 20129)
   2. `9router` (port 20128)
-  3. `cf-ai-proxy` (port 3000, nội bộ)
+  3. `cf-ai-proxy` (port 20127, nội bộ)
   4. `redis` (port 6379, nội bộ)
 - **Tạo Dockerfiles**: Sử dụng multi-stage build với Go 1.24 và Alpine Linux giúp dung lượng image siêu nhẹ và an toàn.
 
 ### 2. Tự động hóa Seed Cơ sở dữ liệu 9router
 - Tạo SQL seed `data/9router/db/init.sql` đăng ký sẵn:
   - API Key: `sk-e03c947dc728e9f5-1lt0v4-32e6f2f4` cho claude-proxy.
-  - Custom Provider: trỏ về `http://cf-ai-proxy:3000/v1` (Docker network internal URL).
+  - Custom Provider: trỏ về `http://cf-ai-proxy:20127/v1` (Docker network internal URL).
   - 5 Combos mapping: `ka.zzz`, `ka.xxx`, `ka.ddd`, `ka.ccc`, `ka.mmm`.
   - 9 model registry trong KV cache của 9router.
 - Tạo script wrapper khởi động `start.sh` trên Host để:

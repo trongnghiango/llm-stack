@@ -14,7 +14,7 @@ claude-proxy  :20129
 9router  :20128  [UI: http://localhost:20128]
      │  Route ka.xxx → cf-ai-proxy/qwen-2.5-coder
      ▼  POST /v1/messages  (Anthropic format)
-cf-ai-proxy  :3000  [internal only]
+cf-ai-proxy  :20127  [internal only]
      │  Convert Anthropic ↔ Cloudflare format
      │  Load-balance qua nhiều CF accounts
      ▼
@@ -76,7 +76,7 @@ Trong `~/.claude/settings.json`:
 |---------------|-------|--------------------------------------------|
 | `claude-proxy` | 20129 | Model rewriter, chỉ bind localhost         |
 | `9router`      | 20128 | LLM router + UI admin                      |
-| `cf-ai-proxy`  | 3000  | Cloudflare proxy (internal only)           |
+| `cf-ai-proxy`  | 20127 | Cloudflare proxy (internal only)           |
 | `redis`        | —     | Session/quota storage (internal only)      |
 
 ## 9router UI
