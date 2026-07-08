@@ -11,12 +11,26 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"github.com/trongnghiango/claude-proxy/internal/utils"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// envBool reads an env var as bool (inline copy – avoids import cycle with utils).
+func envBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	switch strings.ToLower(v) {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return def
+}
 
 // logDateFormat defines date format for log filenames.
 const logDateFormat = "2006-01-02"
@@ -123,30 +137,24 @@ var payloadsDir = "logs/payloads"
 
 func initLogConfig() {
 	// Toggle info logs via LOG_INFO env var (default enabled).
-	if v := utils.Bool("LOG_INFO", true); !v {
+	if v := envBool("LOG_INFO", true); !v {
 		logInfoEnabled = false
 	} else {
 		logInfoEnabled = true
 	}
 	// Toggle debug logs via LOG_DEBUG env var (default disabled).
-	if utils.Bool("LOG_DEBUG", false) {
+	if envBool("LOG_DEBUG", false) {
 		logDebugEnabled = true
 	} else {
 		logDebugEnabled = false
 	}
 	// Toggle payload logging via LOG_PAYLOADS env var (default matches logDebugEnabled).
-	if v, ok := os.LookupEnv("LOG_PAYLOADS"); ok {
-        if utils.Bool("LOG_PAYLOADS", false) {
-            logPayloadsEnabled = true
-        } else {
-            logPayloadsEnabled = false
-        }
-    } else {
-        logPayloadsEnabled = logDebugEnabled
-    }
-		logPayloadsEnabled = true
-	} else if v == "0" || strings.EqualFold(v, "false") {
-		logPayloadsEnabled = false
+	if _, ok := os.LookupEnv("LOG_PAYLOADS"); ok {
+		if envBool("LOG_PAYLOADS", false) {
+			logPayloadsEnabled = true
+		} else {
+			logPayloadsEnabled = false
+		}
 	} else {
 		logPayloadsEnabled = logDebugEnabled
 	}
