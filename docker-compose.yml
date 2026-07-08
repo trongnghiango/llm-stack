@@ -55,10 +55,8 @@ services:
         condition: service_healthy
     networks:
       - llm-net
-    # Không expose port ra ngoài – chỉ 9router cần gọi vào
-    # Uncomment dòng dưới nếu muốn test trực tiếp
-    # ports:
-    #   - "127.0.0.1:20127:20127"
+    ports:
+      - "127.0.0.1:20127:20127"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:20127/health 2>/dev/null || exit 0"]
       interval: 15s
