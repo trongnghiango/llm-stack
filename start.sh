@@ -10,33 +10,49 @@ DB_DIR="$PROJECT_ROOT/data/9router/db"
 DB_PATH="$DB_DIR/data.sqlite"
 INIT_SQL="$DB_DIR/init.sql"
 
-# 1. Đảm bảo thư mục db tồn tại
+# 1. Đảm bảo thư mục tồn tại
 mkdir -p "$DB_DIR"
 mkdir -p "$PROJECT_ROOT/data/redis"
 
-# 2. Khởi tạo DB SQLite trên Host nếu chưa tồn tại
-if [ ! -f "$DB_PATH" ]; then
-  echo "🤖 [Init] SQLite DB chưa tồn tại. Đang tạo và seed trên Host..."
-  if command -v sqlite3 >/dev/null 2>&1; then
-    sqlite3 "$DB_PATH" < "$INIT_SQL"
-    echo "✅ [Init] Đã tạo SQLite DB thành công tại: $DB_PATH"
-  else
-    echo "❌ [Init] Không tìm thấy lệnh 'sqlite3' trên máy Host! Vui lòng cài đặt sqlite3 (sudo apt install sqlite3) hoặc tạo file DB thủ công."
-    exit 1
-  fi
-else
-  echo "ℹ️ [Init] SQLite DB đã tồn tại. Bỏ qua bước seed."
-fi
-
-# 3. Đảm bảo quyền ghi (write permissions) cho container
-# 9router chạy với node user (thường uid 1000 hoặc root tùy image)
-# Set chmod cho chắc chắn không dính lỗi Permission Denied trong volume mount
+# Set quyền ghi ban đầu cho data volume
 chmod -R 777 "$PROJECT_ROOT/data"
 
-# 4. Khởi động Docker Compose
+# Ghi nhận trạng thái DB trước khi khởi động
+DB_EXISTS=true
+if [ ! -f "$DB_PATH" ]; then
+  DB_EXISTS=false
+fi
+
+# 2. Khởi động Docker Compose
 echo "🚀 Đang khởi động llm-stack bằng Docker Compose..."
 docker compose down 2>/dev/null || true
 docker compose up -d --build
+
+# 3. Thực hiện Seeding nếu DB được tạo mới
+if [ "$DB_EXISTS" = "false" ]; then
+  echo "⏳ Chờ 9router khởi chạy và tạo cấu trúc DB (5 giây)..."
+  sleep 5
+  
+  if [ -f "$DB_PATH" ]; then
+    echo "🤖 [Init] Đang nạp cấu hình Custom Providers và Combos từ init.sql..."
+    if command -v sqlite3 >/dev/null 2>&1; then
+      sqlite3 "$DB_PATH" < "$INIT_SQL"
+      echo "✅ [Init] Nạp dữ liệu seed thành công!"
+      
+      echo "🔄 Restarting 9router để cập nhật cấu hình..."
+      docker compose restart 9router
+    else
+      echo "❌ [Init] Lỗi: Máy Host thiếu 'sqlite3' để nạp seed. Vui lòng tự import init.sql."
+    fi
+  else
+    echo "⚠️ [Init] Không tìm thấy data.sqlite được tạo ra bởi 9router. Bỏ qua bước seed."
+  fi
+else
+  echo "ℹ️ [Init] SQLite DB đã tồn tại. Bỏ qua bước seed dữ liệu."
+fi
+
+# Set lại quyền lần cuối cho an toàn
+chmod -R 777 "$PROJECT_ROOT/data"
 
 echo "🎉 llm-stack đã được khởi động thành công!"
 docker compose ps

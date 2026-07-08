@@ -139,7 +139,7 @@ INSERT OR IGNORE INTO _meta (key, value) VALUES
 -- Hash bcrypt (cost=10): $2b$10$9K3BPKP1BVZZ6AjPvRn8XOF9Q1pLmNeTDxwEr2QrBmLQ7AXqZOhK
 -- Đổi bằng lệnh: docker exec -it llm-9router sh -c "npx bcrypt-cli hash 'newpassword'"
 -- ---------------------------------------------------------------------------
-INSERT OR IGNORE INTO settings (id, data) VALUES (
+INSERT OR REPLACE INTO settings (id, data) VALUES (
   1,
   json_object(
     'password', '$2b$10$ArWCvvtCKvTiHySPtwbGeuc42mDPQ1ru7cVy/BAcC3kfWzaxTVbum',
