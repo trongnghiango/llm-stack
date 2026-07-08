@@ -1,0 +1,15 @@
+# Binaries
+proxy
+/claude-proxy
+o/
+
+# Logs
+logs/
+*.log
+
+# Test temporary directories
+tmp/
+
+# Claude Code & Agents
+.claude/
+.agents/

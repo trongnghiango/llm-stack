@@ -1,0 +1,19 @@
+# Git
+.git
+.gitignore
+
+# Compiled binary
+cf-ai-proxy
+
+# Test artifacts
+*.test
+*.out
+
+# Docs
+docs/
+HANDOFF.md
+*.md
+*.csv
+
+# Secrets
+.env

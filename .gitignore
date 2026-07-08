@@ -1,0 +1,30 @@
+# Secrets
+.env
+
+# Runtime data (SQLite, logs, redis)
+data/9router/db/data.sqlite
+data/9router/db/data.sqlite-shm
+data/9router/db/data.sqlite-wal
+data/9router/logs/
+data/9router/auth/
+data/9router/jwt-secret
+data/9router/machine-id
+data/9router/bin/
+data/redis/
+
+# Go build artifacts
+services/cf-ai-proxy/cf-ai-proxy
+services/claude-proxy/proxy
+services/claude-proxy/claude-proxy
+
+# Logs
+*.log
+logs/
+
+# Go test cache
+*.test
+*.out
+
+# OS
+.DS_Store
+Thumbs.db

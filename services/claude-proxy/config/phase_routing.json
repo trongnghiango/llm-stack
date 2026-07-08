@@ -1,0 +1,9 @@
+{
+  "routing": {
+    "PLANNING": "GPT-OSS-120B",
+    "IMPLEMENTATION": "GLM-5.2",
+    "TESTING": "DeepSeek",
+    "REVIEW": "GPT-OSS-120B",
+    "DOC": "MiniMax"
+  }
+}

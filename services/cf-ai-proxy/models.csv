@@ -1,0 +1,40 @@
+# ==============================================================================
+# CLOUDFLARE POOL PROXY - DYNAMIC MODELS CONFIGURATION (models.csv)
+# ==============================================================================
+# QUY ƯỚC QUAN TRỌNG:
+# - Các alias tuyệt đối KHÔNG chứa ký tự gạch chéo `/` để tránh lỗi định tuyến 9router.
+# ==============================================================================
+
+# --- Mappings Hiện Tại cho Claude Code / 9router (Không chứa /) ---
+deepseek-r1-distill-qwen-32b,@cf/deepseek-ai/deepseek-r1-distill-qwen-32b
+qwen2.5-coder-7b-instruct,@cf/qwen/qwen2.5-coder-32b-instruct
+llama-3.1-8b-instruct,@cf/meta/llama-3.1-8b-instruct
+
+# --- Định Danh Rút Gọn / Chuẩn Hóa ---
+qwen-2.5-coder,@cf/qwen/qwen2.5-coder-32b-instruct
+llama-3.1-8b,@cf/meta/llama-3.1-8b-instruct
+llama-3.2-1b,@cf/meta/llama-3.2-1b-instruct
+llama-3.2-3b,@cf/meta/llama-3.2-3b-instruct
+llama-3.1-70b,@cf/meta/llama-3.1-70b-instruct
+gemma-2-9b,@cf/google/gemma-2-9b-it
+mistral-7b,@cf/mistralai/mistral-7b-instruct-v0.2
+phi-3,@cf/microsoft/phi-3-medium-4k-instruct
+
+# --- Mô hình tương thích phụ trợ ---
+gpt-4o-mini,@cf/meta/llama-3.1-8b-instruct
+
+# =====================================================================
+# 🏆 — Best Value
+# Chỉ 4,625 neurons/M input và 30,475 neurons/M output — cực rẻ cho model 30B
+# Kiến trúc MoE (Mixture of Experts) nên nhanh và rẻ dù parameter lớn
+# Context 32K tokens, có reasoning
+# Đây là lựa chọn tối ưu nhất giữa giá và chất lượng
+qwen3-30b-a3b-fp8,@cf/qwen/qwen3-30b-a3b-fp8
+
+# =====================================================================
+#  — Cân bằng tốt nhất
+# 4,119 neurons/M input, 34,868 neurons/M output
+# Context 60K tokens, function calling, tối ưu tốc độ (fp8-fast)
+# Phù hợp cho hầu hết use case thông thường
+# =====================================================================
+llama-3.1-8b-instruct-fp8-fast,@cf/meta/llama-3.1-8b-instruct-fp8-fast

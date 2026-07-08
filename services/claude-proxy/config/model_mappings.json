@@ -1,0 +1,25 @@
+{
+  "comment": "Mapper layer to translate Framework Conceptual Models to Claude Code / Anthropic Production APIs",
+  "mappings": {
+    "GPT-OSS-120B": {
+      "target_api_model": "claude-3-5-opus-latest",
+      "alias": "OPUS",
+      "tier": "Tier-1-Reasoning"
+    },
+    "GLM-5.2": {
+      "target_api_model": "claude-3-5-sonnet-latest",
+      "alias": "SONNET",
+      "tier": "Tier-2-Execution"
+    },
+    "DeepSeek": {
+      "target_api_model": "claude-3-5-haiku-latest",
+      "alias": "HAIKU",
+      "tier": "Tier-3-Boilerplate-Speed"
+    },
+    "MiniMax": {
+      "target_api_model": "custom-model-endpoint",
+      "alias": "CUSTOM",
+      "tier": "Tier-4-Knowledge-Processing"
+    }
+  }
+}

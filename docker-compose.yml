@@ -1,0 +1,137 @@
+# =============================================================================
+# llm-stack – Docker Compose
+#
+# Luồng:
+#   Claude Code (host:20129)
+#     → claude-proxy  (20129)  [model rewrite: swe.* → ka.*]
+#     → 9router       (20128)  [LLM router / load balancer]
+#     → cf-ai-proxy   (3000)   [Anthropic ↔ Cloudflare CF format]
+#     → Cloudflare Workers AI
+#         + Redis (session/quota storage)
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Redis – Session và Quota tracking cho cf-ai-proxy
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: llm-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - llm-net
+    command: redis-server --appendonly yes --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # cf-ai-proxy – Chuyển đổi Anthropic ↔ Cloudflare Workers AI format
+  # Tự load-balance qua nhiều CF accounts (accounts.csv)
+  # Sync Neurons usage từ Cloudflare GraphQL API
+  # ---------------------------------------------------------------------------
+  cf-ai-proxy:
+    build:
+      context: ./services/cf-ai-proxy
+      dockerfile: Dockerfile
+    image: llm-cf-ai-proxy:latest
+    container_name: llm-cf-ai-proxy
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - GIN_MODE=release
+      - TZ=${TZ:-Asia/Ho_Chi_Minh}
+    volumes:
+      # Mount CSV files để có thể edit mà không cần rebuild
+      - ./services/cf-ai-proxy/accounts.csv:/app/accounts.csv:ro
+      - ./services/cf-ai-proxy/models.csv:/app/models.csv:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - llm-net
+    # Không expose port ra ngoài – chỉ 9router cần gọi vào
+    # Uncomment dòng dưới nếu muốn test trực tiếp
+    # ports:
+    #   - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health 2>/dev/null || exit 0"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # 9router – LLM Router / Load Balancer
+  # Nhận request từ claude-proxy, route tới cf-ai-proxy hoặc provider khác
+  # UI admin: http://localhost:20128  (đăng nhập bằng password trong init.sql)
+  # ---------------------------------------------------------------------------
+  9router:
+    image: decolua/9router:latest
+    container_name: llm-9router
+    restart: unless-stopped
+    ports:
+      - "20128:20128"          # Expose để truy cập UI admin từ host
+    volumes:
+      # Mount toàn bộ data dir (SQLite DB, logs, auth...)
+      - ./data/9router:/app/data
+      # Mount init script vào entrypoint wrapper
+      - ./scripts/9router-init.sh:/entrypoint-init.sh:ro
+    environment:
+      - TZ=${TZ:-Asia/Ho_Chi_Minh}
+      - PORT=20128
+      - HOSTNAME=0.0.0.0
+      - DATA_DIR=/app/data
+      - NODE_ENV=production
+    entrypoint: ["/bin/sh", "/entrypoint-init.sh"]
+    depends_on:
+      cf-ai-proxy:
+        condition: service_started
+    networks:
+      - llm-net
+    extra_hosts:
+      # Giữ host.docker.internal để nếu cần thêm provider trỏ về host
+      - "host.docker.internal:host-gateway"
+
+  # ---------------------------------------------------------------------------
+  # claude-proxy – Model name rewriter
+  # Intercept Claude Code → rewrite swe.* model names → ka.* → forward to 9router
+  # Chỉ bind localhost vì Claude Code chạy trên host
+  # ---------------------------------------------------------------------------
+  claude-proxy:
+    build:
+      context: ./services/claude-proxy
+      dockerfile: Dockerfile
+    image: llm-claude-proxy:latest
+    container_name: llm-claude-proxy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:20129:20129"   # Chỉ bind localhost – Claude Code dùng
+    volumes:
+      # Mount config để edit không cần rebuild
+      - ./services/claude-proxy/config.json:/app/config.json:ro
+    depends_on:
+      - 9router
+    networks:
+      - llm-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:20129/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# =============================================================================
+networks:
+  llm-net:
+    driver: bridge
+    name: llm-net
+
+volumes:
+  redis-data:
+    name: llm-redis-data
