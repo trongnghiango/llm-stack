@@ -37,7 +37,7 @@ Chúng ta đã hoàn thành việc tái cấu trúc lớn và hợp nhất 3 ser
 
 ## 📊 Trạng thái các Tài khoản Cloudflare hiện tại (Kiểm tra E2E)
 Khi chạy thử file test E2E `test_upstream.py`, Cloudflare trả về lỗi 401/410. Sau khi debug trực tiếp, đây là trạng thái thực tế:
-- `f694fb73`: Token bị sai hoặc đã thu hồi (`Authentication error`).
+- `f694fb73`: Hoạt động bình thường (dùng token cfut_).
 - `a3036b15`: Đã dùng hết định mức miễn phí hôm nay (`used up daily free allocation of 10,000 neurons`).
 - `fe82cd11`: Đã dùng hết định mức miễn phí hôm nay (`used up daily free allocation of 10,000 neurons`).
 - `5f8d3bed`: Đã dùng hết định mức miễn phí hôm nay (`used up daily free allocation of 10,000 neurons`).
