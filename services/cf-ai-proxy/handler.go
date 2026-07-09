@@ -166,10 +166,8 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 				"content": v,
 			})
 		case []interface{}:
-			hasToolUse := false
 			hasToolResult := false
 			var textParts []string
-			var toolCalls []interface{}
 
 			for _, block := range v {
 				blockMap, ok := block.(map[string]interface{})
@@ -184,21 +182,13 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 						textParts = append(textParts, txt)
 					}
 				case "tool_use":
-					hasToolUse = true
-					id, _ := blockMap["id"].(string)
 					name, _ := blockMap["name"].(string)
 					input := blockMap["input"]
 					
 					inputBytes, _ := json.Marshal(input)
-					
-					toolCalls = append(toolCalls, map[string]interface{}{
-						"id":   id,
-						"type": "function",
-						"function": map[string]interface{}{
-							"name":      name,
-							"arguments": string(inputBytes),
-						},
-					})
+					// Tái cấu trúc thành dạng JSON thô gọi tool của mô hình
+					toolCallText := fmt.Sprintf("\n{\"name\": \"%s\", \"arguments\": %s}", name, string(inputBytes))
+					textParts = append(textParts, toolCallText)
 				case "tool_result":
 					hasToolResult = true
 					toolUseID, _ := blockMap["tool_use_id"].(string)
@@ -223,10 +213,10 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 						resultStr = string(bBytes)
 					}
 
+					// Gửi tool_result dưới dạng user message thông thường để bypass lỗi 400 của Cloudflare
 					openAIMessages = append(openAIMessages, map[string]interface{}{
-						"role":         "tool",
-						"tool_call_id": toolUseID,
-						"content":      resultStr,
+						"role":    "user",
+						"content": fmt.Sprintf("[Tool Result for tool_use_id: %s]\n%s", toolUseID, resultStr),
 					})
 				}
 			}
@@ -236,9 +226,6 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 				newMsg := map[string]interface{}{
 					"role":    msg.Role,
 					"content": contentVal,
-				}
-				if hasToolUse {
-					newMsg["tool_calls"] = toolCalls
 				}
 				openAIMessages = append(openAIMessages, newMsg)
 			}
