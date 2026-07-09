@@ -502,6 +502,11 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 	var ended bool = false
 	var hasToolUse bool = false
 
+	// Map theo dõi trạng thái gửi tool_use chuẩn SSE
+	sentToolStart := make(map[int]bool)
+	toolIDs := make(map[int]string)
+	toolNames := make(map[int]string)
+
 	var streamBuffer strings.Builder
 	var flushedBuffer bool = false
 
@@ -648,12 +653,27 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 			flushedBuffer = true
 		}
 
+		// Gửi content_block_stop cho text block (index 0)
 		contentBlockStop := map[string]interface{}{
 			"type":  "content_block_stop",
 			"index": 0,
 		}
 		blockStopBytes, _ := json.Marshal(contentBlockStop)
 		fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(blockStopBytes))
+
+		// Gửi content_block_stop cho toàn bộ các tool blocks đã khởi động
+		if hasToolUse {
+			for tIdx, sent := range sentToolStart {
+				if sent {
+					toolStopBlk := map[string]interface{}{
+						"type":  "content_block_stop",
+						"index": tIdx + 1,
+					}
+					stopBytes, _ := json.Marshal(toolStopBlk)
+					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(stopBytes))
+				}
+			}
+		}
 
 		stopReason := "end_turn"
 		if hasToolUse {
@@ -711,55 +731,89 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 			return true
 		}
 
-		// 1. Kiểm tra phát hiện Tool Calls trong luồng Stream
-		if toolCalls, exists := cfJSON["tool_calls"].([]interface{}); exists && len(toolCalls) > 0 {
-			hasToolUse = true
-			for idx, tc := range toolCalls {
-				if tcMap, ok := tc.(map[string]interface{}); ok {
-					id, _ := tcMap["id"].(string)
-					name, _ := tcMap["name"].(string)
-					args := tcMap["arguments"]
-
-					var argsMap map[string]interface{}
-					if argsStr2, ok2 := args.(string); ok2 {
-						json.Unmarshal([]byte(argsStr2), &argsMap)
-					} else if am, ok2 := args.(map[string]interface{}); ok2 {
-						argsMap = am
+		// 1. Kiểm tra phát hiện Tool Calls chuẩn OpenAI trong choices[0].delta.tool_calls hoặc cấp cao nhất
+		var openAIToolCalls []interface{}
+		if choices, ok := cfJSON["choices"].([]interface{}); ok && len(choices) > 0 {
+			if choiceMap, ok := choices[0].(map[string]interface{}); ok {
+				if deltaMap, ok := choiceMap["delta"].(map[string]interface{}); ok {
+					if tcList, ok := deltaMap["tool_calls"].([]interface{}); ok {
+						openAIToolCalls = tcList
 					}
-					argsBytes, _ := json.Marshal(argsMap)
-					argsStr := string(argsBytes)
+				}
+			}
+		}
+		if len(openAIToolCalls) == 0 {
+			if tcList, ok := cfJSON["tool_calls"].([]interface{}); ok {
+				openAIToolCalls = tcList
+			}
+		}
 
-					// --- Gửi tool_use block ---
+		if len(openAIToolCalls) > 0 {
+			hasToolUse = true
+			for _, tc := range openAIToolCalls {
+				tcMap, ok := tc.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				tIdx := 0
+				if val, ok := tcMap["index"].(float64); ok {
+					tIdx = int(val)
+				} else if val, ok := tcMap["index"].(int); ok {
+					tIdx = val
+				}
+
+				id, _ := tcMap["id"].(string)
+				var name string
+				if funcMap, ok := tcMap["function"].(map[string]interface{}); ok {
+					name, _ = funcMap["name"].(string)
+				}
+
+				if id != "" {
+					toolIDs[tIdx] = id
+				}
+				if name != "" {
+					toolNames[tIdx] = name
+				}
+
+				var argsDelta string
+				if funcMap, ok := tcMap["function"].(map[string]interface{}); ok {
+					if argsStr2, ok2 := funcMap["arguments"].(string); ok2 {
+						argsDelta = argsStr2
+					} else if argsObj, ok2 := funcMap["arguments"].(map[string]interface{}); ok2 {
+						argsBytes, _ := json.Marshal(argsObj)
+						argsDelta = string(argsBytes)
+					}
+				}
+
+				// Gửi content_block_start một lần duy nhất khi nhận đủ ID và Name của tool
+				if !sentToolStart[tIdx] && toolIDs[tIdx] != "" && toolNames[tIdx] != "" {
 					toolBlockStart := map[string]interface{}{
 						"type":  "content_block_start",
-						"index": idx + 1,
+						"index": tIdx + 1,
 						"content_block": map[string]interface{}{
 							"type": "tool_use",
-							"id":   id,
-							"name": name,
+							"id":   toolIDs[tIdx],
+							"name": toolNames[tIdx],
 						},
 					}
 					tbsBytes, _ := json.Marshal(toolBlockStart)
 					fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
+					sentToolStart[tIdx] = true
+				}
 
+				// Chỉ gửi content_block_delta nếu start block đã được phát
+				if argsDelta != "" && sentToolStart[tIdx] {
 					toolBlockDelta := map[string]interface{}{
 						"type":  "content_block_delta",
-						"index": idx + 1,
+						"index": tIdx + 1,
 						"delta": map[string]interface{}{
 							"type":         "input_json_delta",
-							"partial_json": argsStr,
+							"partial_json": argsDelta,
 						},
 					}
 					tbdBytes, _ := json.Marshal(toolBlockDelta)
 					fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
-
-					toolBlockStop := map[string]interface{}{
-						"type":  "content_block_stop",
-						"index": idx + 1,
-					}
-					tbstBytes, _ := json.Marshal(toolBlockStop)
-					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
-
 				}
 			}
 		}
