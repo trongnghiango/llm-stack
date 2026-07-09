@@ -70,3 +70,8 @@ docker compose ps
 ### 🔥 Tính năng bổ sung: Tự động Hot Reload cấu hình CSV
 - Đã cài đặt một background file watcher chạy định kỳ **mỗi 5 giây** để giám sát sự thay đổi thời gian chỉnh sửa (`ModTime`) của `accounts.csv` và `models.csv`.
 - Khi người dùng chỉnh sửa trực tiếp các file CSV này trên máy Host, proxy sẽ tự động nạp lại cấu hình tức thì trong nền (Zero-Downtime), không làm gián đoạn hay đứt kết nối HTTP đang chạy, đồng thời tự động kích hoạt đồng bộ Neurons cho các tài khoản mới nạp.
+
+### ⚡ Tính năng bổ sung: Cấu hình tự động NVIDIA NIM
+- Đã tạo script tự động hóa: [sync_nim_accounts.py](file:///home/ka/Repos/github.com/trongnghiango/llm-stack/scripts/sync_nim_accounts.py) đọc file `NIM_accounts.csv` ở root dự án và chèn cấu hình trực tiếp vào SQLite database của 9router.
+- Đã đăng ký Provider Node `NVIDIA-NIM` (OpenAI-compatible) với API Endpoint `https://integrate.api.nvidia.com/v1`.
+- Cập nhật file seed `init.sql` của 9router để tự động đăng ký node này khi khởi tạo stack sạch từ đầu.
