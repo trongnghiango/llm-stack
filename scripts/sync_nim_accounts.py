@@ -14,6 +14,7 @@ def is_valid_uuid(val):
         return False
 
 def sync_nim():
+    # Sử dụng duy nhất đường dẫn trong dự án hợp nhất llm-stack
     project_dir = "/home/ka/Repos/github.com/trongnghiango/llm-stack"
     csv_path = os.path.join(project_dir, "NIM_accounts.csv")
     db_path = os.path.join(project_dir, "data/9router/db/data.sqlite")
@@ -37,6 +38,7 @@ def sync_nim():
                 if row.get("name") and row.get("token"):
                     csv_id = row.get("ID", "").strip()
                     conn_id = csv_id
+                    # Tự sinh UUID nếu ID rỗng hoặc không đúng định dạng
                     if not csv_id or not is_valid_uuid(csv_id):
                         conn_id = str(uuid.uuid4())
 
@@ -65,17 +67,14 @@ def sync_nim():
         # Dọn dẹp các connection loại 'nvidia' cũ
         cursor.execute("DELETE FROM providerConnections WHERE provider='nvidia';")
 
-        # 3. Inject cả 2 dạng connection (Normal và Invert) để thực nghiệm trên UI
+        # 3. Inject các Connections loại 'nvidia' chuẩn của 9router
         injected_count = 0
         for acc in accounts:
+            conn_id = acc["id"]
+            conn_name = acc["name"]
             api_key = acc["token"]
             
-            # --- DẠNG 1: XUÔI CỘT (NORMAL) ---
-            id_normal = str(uuid.uuid4())
-            name_normal = acc["name"]
-            authtype_normal = "apikey"
-            
-            conn_data_normal = {
+            conn_data = {
                 "apiKey": api_key,
                 "testStatus": "active",
                 "providerSpecificData": {
@@ -90,54 +89,22 @@ def sync_nim():
                     id, provider, authType, name, priority, isActive, data, createdAt, updatedAt
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
-                id_normal,
-                "nvidia",
-                authtype_normal, # authType = apikey
-                name_normal,      # name = NIM_GOON_003
-                1,
-                1,
-                json.dumps(conn_data_normal),
+                conn_id,
+                "nvidia",       # provider
+                "apikey",       # authType (Loại xác thực là apikey)
+                conn_name,      # name (Tên connection ví dụ NIM_GOON_003)
+                1,              # priority
+                1,              # isActive = true
+                json.dumps(conn_data),
                 datetime.now().isoformat() + "Z",
                 datetime.now().isoformat() + "Z"
             ))
-            print(f"  ⚡ Đã nạp Normal: {name_normal} (authType=apikey, name={name_normal})")
-
-            # --- DẠNG 2: NGƯỢC CỘT (INVERT) ---
-            id_invert = str(uuid.uuid4())
-            name_invert = "apikey"
-            authtype_invert = f"{acc['name']}_INV"
-            
-            conn_data_invert = {
-                "apiKey": api_key,
-                "testStatus": "active",
-                "providerSpecificData": {
-                    "connectionProxyEnabled": False,
-                    "connectionProxyUrl": "",
-                    "connectionNoProxy": ""
-                }
-            }
-
-            cursor.execute("""
-                INSERT OR REPLACE INTO providerConnections (
-                    id, provider, authType, name, priority, isActive, data, createdAt, updatedAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """, (
-                id_invert,
-                "nvidia",
-                authtype_invert, # authType = NIM_GOON_003_INV
-                name_invert,      # name = apikey
-                1,
-                1,
-                json.dumps(conn_data_invert),
-                datetime.now().isoformat() + "Z",
-                datetime.now().isoformat() + "Z"
-            ))
-            print(f"  ⚡ Đã nạp Invert: {authtype_invert} (authType={authtype_invert}, name=apikey)")
-            injected_count += 2
+            injected_count += 1
+            print(f"  ⚡ Đã nạp Connection: {conn_name} (ID: {conn_id})")
 
         conn.commit()
         conn.close()
-        print(f"🎉 Đồng bộ hoàn tất! Đã nạp song song {injected_count} connections thử nghiệm vào SQLite.")
+        print(f"🎉 Đồng bộ thành công! Đã nạp {injected_count} connections NVIDIA NIM vào database của 9router.")
 
     except sqlite3.Error as e:
         print(f"❌ Lỗi SQLite: {e}")
