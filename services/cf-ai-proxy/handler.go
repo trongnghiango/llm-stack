@@ -143,7 +143,7 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 	// Tự động thêm chỉ thị hệ thống để ép Qwen/DeepSeek gọi tool qua JSON thô chuẩn xác
 	toolSystemInstruction := ""
 	if req.Tools != nil {
-		toolSystemInstruction = "\n\n[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST use the EXACT tool name and arguments schema defined in the provided tools list (e.g., 'ViewFile', 'WriteFile', 'EditFile', 'Bash', 'Glob', 'Grep'). Output your tool call as a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"tool_name_from_provided_list\", \"arguments\": {\"param1\": \"value1\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately."
+		toolSystemInstruction = "\n\n[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST use the EXACT tool name and arguments schema defined in the provided tools list (e.g., 'Read', 'Write', 'Edit', 'Bash'). Output your tool call as a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"tool_name_from_provided_list\", \"arguments\": {\"param1\": \"value1\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately."
 	}
 
 	if systemPrompt != "" {
@@ -154,7 +154,7 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 	} else if toolSystemInstruction != "" {
 		openAIMessages = append(openAIMessages, map[string]string{
 			"role":    "system",
-			"content": "[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST use the EXACT tool name and arguments schema defined in the provided tools list (e.g., 'ViewFile', 'WriteFile', 'EditFile', 'Bash', 'Glob', 'Grep'). Output your tool call as a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"tool_name_from_provided_list\", \"arguments\": {\"param1\": \"value1\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately.",
+			"content": "[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST use the EXACT tool name and arguments schema defined in the provided tools list (e.g., 'Read', 'Write', 'Edit', 'Bash'). Output your tool call as a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"tool_name_from_provided_list\", \"arguments\": {\"param1\": \"value1\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately.",
 		})
 	}
 
