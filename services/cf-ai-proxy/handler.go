@@ -113,7 +113,10 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 		return
 	}
 
-	// 1. Chuyển đổi tin nhắn hệ thống (System prompt) và các block tin nhắn
+	// Log danh sách các tools nhận từ client
+	if req.Tools != nil {
+		log.Printf("[🔧 Client Tools Metadata] Tools: %+v", req.Tools)
+	}
 	var openAIMessages []interface{}
 	var systemPrompt string
 	if req.System != nil {
