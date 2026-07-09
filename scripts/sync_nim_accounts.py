@@ -3,7 +3,15 @@ import os
 import csv
 import sqlite3
 import json
+import uuid
 from datetime import datetime
+
+def is_valid_uuid(val):
+    try:
+        uuid.UUID(str(val))
+        return True
+    except ValueError:
+        return False
 
 def sync_nim():
     project_dir = "/home/ka/Repos/github.com/trongnghiango/llm-stack"
@@ -26,9 +34,16 @@ def sync_nim():
             reader.fieldnames = [name.strip() for name in reader.fieldnames]
             
             for row in reader:
-                if row.get("ID") and row.get("name") and row.get("token"):
+                if row.get("name") and row.get("token"):
+                    csv_id = row.get("ID", "").strip()
+                    # Nếu ID trống hoặc không phải UUID chuẩn, tự động sinh UUIDv4 chuẩn
+                    conn_id = csv_id
+                    if not csv_id or not is_valid_uuid(csv_id):
+                        conn_id = str(uuid.uuid4())
+                        print(f"💡 ID '{csv_id}' không chuẩn UUID. Đã tự động tạo UUID mới: {conn_id}")
+
                     accounts.append({
-                        "id": row["ID"].strip(),
+                        "id": conn_id,
                         "name": row["name"].strip(),
                         "token": row["token"].strip(),
                         "expiration": row.get("expiration", "").strip()
@@ -49,15 +64,12 @@ def sync_nim():
         cursor = conn.cursor()
         cursor.execute("PRAGMA foreign_keys = ON;")
         
-        # 3. Dọn dẹp providerNode và providerConnection custom cũ (nếu có) để tránh rác DB
-        cursor.execute("DELETE FROM providerNodes WHERE id='openai-compatible-nvidia-nim';")
-        cursor.execute("DELETE FROM providerConnections WHERE provider='openai-compatible-nvidia-nim';")
+        # Dọn dẹp các connection loại 'nvidia' cũ để tránh rác DB
+        cursor.execute("DELETE FROM providerConnections WHERE provider='nvidia';")
 
-        # 4. Inject các Connections loại 'nvidia' chuẩn của 9router
+        # 3. Inject các Connections loại 'nvidia' chuẩn của 9router
         injected_count = 0
         for acc in accounts:
-            # Dùng luôn ID trong CSV làm ID của Connection hoặc sinh UUID
-            # Để đồng bộ, ta dùng luôn ID từ CSV (ví dụ: bb0b2348-fe3c-4db7-b872-87e90...)
             conn_id = acc["id"]
             conn_name = acc["name"]
             api_key = acc["token"]
