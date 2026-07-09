@@ -52,7 +52,6 @@ func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
 	}
 
 	var resp *http.Response
-	var err error
 	var account CFAccount
 
 	// Vòng lặp Failover khẩn cấp chuyển đổi tài khoản khi dính lỗi
@@ -65,6 +64,7 @@ func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
 		}
 
 		// Gọi chuyển tiếp đến Cloudflare
+		var err error
 		resp, err = h.forwardToCloudflare(account, req.Model, req)
 
 		if err != nil {
@@ -143,18 +143,22 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 	// Tự động thêm chỉ thị hệ thống để ép Qwen/DeepSeek gọi tool qua JSON thô chuẩn xác
 	toolSystemInstruction := ""
 	if req.Tools != nil {
-		toolSystemInstruction = "\n\n[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST use the EXACT tool name and arguments schema defined in the provided tools list (e.g., 'Read', 'Write', 'Edit', 'Bash'). Output your tool call as a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"tool_name_from_provided_list\", \"arguments\": {\"param1\": \"value1\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately."
+		toolSystemInstruction = "[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST use the EXACT tool name and arguments schema defined in the provided tools list (e.g., 'Read', 'Write', 'Edit', 'Bash'). Output your tool call as a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"tool_name_from_provided_list\", \"arguments\": {\"param1\": \"value1\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately."
 	}
 
 	if systemPrompt != "" {
+		content := systemPrompt
+		if toolSystemInstruction != "" {
+			content += "\n\n" + toolSystemInstruction
+		}
 		openAIMessages = append(openAIMessages, map[string]string{
 			"role":    "system",
-			"content": systemPrompt + toolSystemInstruction,
+			"content": content,
 		})
 	} else if toolSystemInstruction != "" {
 		openAIMessages = append(openAIMessages, map[string]string{
 			"role":    "system",
-			"content": "[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST use the EXACT tool name and arguments schema defined in the provided tools list (e.g., 'Read', 'Write', 'Edit', 'Bash'). Output your tool call as a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"tool_name_from_provided_list\", \"arguments\": {\"param1\": \"value1\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately.",
+			"content": toolSystemInstruction,
 		})
 	}
 
@@ -239,7 +243,6 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 	}
 
 	var resp *http.Response
-	var err error
 	var account CFAccount
 
 	// 3. Khởi dựng OpenAIRequest giả lập để chuyển tiếp sang API Cloudflare
@@ -265,6 +268,7 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 			return
 		}
 
+		var err error
 		resp, err = h.forwardToCloudflare(account, req.Model, openAIReq)
 
 		if err != nil {
@@ -440,8 +444,7 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 	}
 	c.JSON(http.StatusOK, anthropicResponse)
 
-	estimatedTokens := int64(len(aiResponse) / 4)
-	estimatedNeurons := int64(float64(estimatedTokens) * 1.5)
+	estimatedNeurons := int64(float64(len(aiResponse)/4) * 1.5)
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 50
 	}
@@ -901,7 +904,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 								toolBlockDelta := map[string]interface{}{
 									"type":  "content_block_delta",
-									"index": 1,
+									"index": blkIdx,
 									"delta": map[string]interface{}{
 										"type":         "input_json_delta",
 										"partial_json": argsStr,
@@ -912,7 +915,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 								toolBlockStop := map[string]interface{}{
 									"type":  "content_block_stop",
-									"index": 1,
+									"index": blkIdx,
 								}
 								tbstBytes, _ := json.Marshal(toolBlockStop)
 								fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
@@ -1113,8 +1116,7 @@ func (h *ProxyHandler) handleStandard(c *gin.Context, cfBody io.Reader, accountI
 	}
 	c.JSON(http.StatusOK, openAIResponse)
 
-	estimatedTokens := int64(len(aiResponse) / 4)
-	estimatedNeurons := int64(float64(estimatedTokens) * 1.5)
+	estimatedNeurons := int64(float64(len(aiResponse)/4) * 1.5)
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 50
 	}
