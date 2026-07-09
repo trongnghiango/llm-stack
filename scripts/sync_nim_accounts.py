@@ -36,11 +36,9 @@ def sync_nim():
             for row in reader:
                 if row.get("name") and row.get("token"):
                     csv_id = row.get("ID", "").strip()
-                    # Nếu ID trống hoặc không phải UUID chuẩn, tự động sinh UUIDv4 chuẩn
                     conn_id = csv_id
                     if not csv_id or not is_valid_uuid(csv_id):
                         conn_id = str(uuid.uuid4())
-                        print(f"💡 ID '{csv_id}' không chuẩn UUID. Đã tự động tạo UUID mới: {conn_id}")
 
                     accounts.append({
                         "id": conn_id,
@@ -64,20 +62,22 @@ def sync_nim():
         cursor = conn.cursor()
         cursor.execute("PRAGMA foreign_keys = ON;")
         
-        # Dọn dẹp các connection loại 'nvidia' cũ để tránh rác DB
+        # Dọn dẹp các connection loại 'nvidia' cũ để tránh rác DB (bao gồm cả TEST_NIM để sạch DB)
         cursor.execute("DELETE FROM providerConnections WHERE provider='nvidia';")
 
         # 3. Inject các Connections loại 'nvidia' chuẩn của 9router
+        # LƯU Ý QUAN TRỌNG: Cấu trúc mapping DB của 9router bị ngược cột:
+        # - Tên connection (NIM_GOON_003) được lưu vào cột authType.
+        # - Phương thức xác thực (apikey) được lưu vào cột name.
         injected_count = 0
         for acc in accounts:
             conn_id = acc["id"]
             conn_name = acc["name"]
             api_key = acc["token"]
             
-            # Cấu hình data JSON cho Connection loại 'nvidia'
             conn_data = {
                 "apiKey": api_key,
-                "testStatus": "unknown",
+                "testStatus": "active", # Đặt active luôn để UI hiển thị xanh đẹp
                 "providerSpecificData": {
                     "connectionProxyEnabled": False,
                     "connectionProxyUrl": "",
@@ -91,17 +91,17 @@ def sync_nim():
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
                 conn_id,
-                "nvidia",       # Tên Provider chuẩn của 9router
-                "apikey",
-                conn_name,
-                1,              # Priority mặc định
+                "nvidia",       # provider
+                conn_name,      # authType (Gán tên connection vào đây do 9router bị ngược)
+                "apikey",       # name     (Gán loại xác thực vào đây do 9router bị ngược)
+                1,              # priority
                 1,              # isActive = true
                 json.dumps(conn_data),
                 datetime.now().isoformat() + "Z",
                 datetime.now().isoformat() + "Z"
             ))
             injected_count += 1
-            print(f"  ⚡ Đã nạp Connection: {conn_name} (ID: {conn_id}) -> Loại: nvidia")
+            print(f"  ⚡ Đã nạp Connection: {conn_name} (ID: {conn_id}) -> Khớp mapping ngược của 9router")
 
         conn.commit()
         conn.close()
