@@ -66,3 +66,7 @@ docker compose ps
 2. Vào mục **Providers**, kéo xuống phần Custom Provider **`CF-AI-PROXY-MAIN`**.
 3. Tại phần **Available Models**, click vào nút **`Import from /models`** ở góc phải.
 4. Hệ thống sẽ tự động fetch danh sách từ `http://cf-ai-proxy:20127/v1/models` và nạp đầy đủ 9 model vào giao diện của bạn.
+
+### 🔥 Tính năng bổ sung: Tự động Hot Reload cấu hình CSV
+- Đã cài đặt một background file watcher chạy định kỳ **mỗi 5 giây** để giám sát sự thay đổi thời gian chỉnh sửa (`ModTime`) của `accounts.csv` và `models.csv`.
+- Khi người dùng chỉnh sửa trực tiếp các file CSV này trên máy Host, proxy sẽ tự động nạp lại cấu hình tức thì trong nền (Zero-Downtime), không làm gián đoạn hay đứt kết nối HTTP đang chạy, đồng thời tự động kích hoạt đồng bộ Neurons cho các tài khoản mới nạp.
