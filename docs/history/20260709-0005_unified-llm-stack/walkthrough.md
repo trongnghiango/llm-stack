@@ -73,5 +73,5 @@ docker compose ps
 
 ### ⚡ Tính năng bổ sung: Cấu hình tự động NVIDIA NIM
 - Đã tạo script tự động hóa: [sync_nim_accounts.py](file:///home/ka/Repos/github.com/trongnghiango/llm-stack/scripts/sync_nim_accounts.py) đọc file `NIM_accounts.csv` ở root dự án và chèn cấu hình trực tiếp vào SQLite database của 9router.
-- Đã đăng ký Provider Node `NVIDIA-NIM` (OpenAI-compatible) với API Endpoint `https://integrate.api.nvidia.com/v1`.
-- Cập nhật file seed `init.sql` của 9router để tự động đăng ký node này khi khởi tạo stack sạch từ đầu.
+- Đăng ký các connections dưới dạng Native Provider loại `nvidia` tích hợp sẵn trong 9router.
+- Tối ưu hóa cấu trúc dữ liệu nạp để tương thích tốt nhất với giao diện quản lý và định tuyến của 9router.
