@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"strconv"
 	"time"
 
@@ -36,6 +37,51 @@ func main() {
 	if err := sm.LoadModelsFromCSV("models.csv"); err != nil {
 		log.Printf("⚠️ Cảnh báo: Không thể đọc file models.csv (%v). Sử dụng cấu hình mặc định.", err)
 	}
+
+	// Khởi chạy File Watcher (Hot Reload) cho accounts.csv và models.csv
+	go func() {
+		getModTime := func(filepath string) time.Time {
+			info, err := os.Stat(filepath)
+			if err != nil {
+				return time.Time{}
+			}
+			return info.ModTime()
+		}
+
+		lastAccountsTime := getModTime("accounts.csv")
+		lastModelsTime := getModTime("models.csv")
+
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			// Check accounts.csv
+			accTime := getModTime("accounts.csv")
+			if !accTime.IsZero() && !accTime.Equal(lastAccountsTime) {
+				log.Println("🔥 [Hot Reload] Phát hiện thay đổi trong accounts.csv! Đang nạp lại tài khoản...")
+				if err := sm.LoadAccountsFromCSV("accounts.csv"); err != nil {
+					log.Printf("❌ [Hot Reload] Lỗi nạp lại accounts.csv: %v", err)
+				} else {
+					log.Println("✅ [Hot Reload] Nạp lại accounts.csv thành công!")
+					// Đồng bộ lại Neurons của các tài khoản mới ngay lập tức
+					go sm.SyncNeuronsFromCloudflare()
+				}
+				lastAccountsTime = accTime
+			}
+
+			// Check models.csv
+			modTime := getModTime("models.csv")
+			if !modTime.IsZero() && !modTime.Equal(lastModelsTime) {
+				log.Println("🔥 [Hot Reload] Phát hiện thay đổi trong models.csv! Đang nạp lại models mapping...")
+				if err := sm.LoadModelsFromCSV("models.csv"); err != nil {
+					log.Printf("❌ [Hot Reload] Lỗi nạp lại models.csv: %v", err)
+				} else {
+					log.Println("✅ [Hot Reload] Nạp lại models.csv thành công!")
+				}
+				lastModelsTime = modTime
+			}
+		}
+	}()
 
 	// Khởi chạy đồng bộ Neurons từ Cloudflare GraphQL API
 	go func() {
