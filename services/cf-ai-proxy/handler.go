@@ -137,10 +137,21 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 		}
 	}
 
+	// Tự động thêm chỉ thị hệ thống để ép Qwen/DeepSeek gọi tool qua JSON thô chuẩn xác
+	toolSystemInstruction := ""
+	if req.Tools != nil {
+		toolSystemInstruction = "\n\n[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST output a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"Read\", \"arguments\": {\"file_path\": \"/path/to/file\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately."
+	}
+
 	if systemPrompt != "" {
 		openAIMessages = append(openAIMessages, map[string]string{
 			"role":    "system",
-			"content": systemPrompt,
+			"content": systemPrompt + toolSystemInstruction,
+		})
+	} else if toolSystemInstruction != "" {
+		openAIMessages = append(openAIMessages, map[string]string{
+			"role":    "system",
+			"content": "[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\nWhen you decide to call a tool, you MUST output a raw JSON block with 'name' and 'arguments' fields. Example:\n{\"name\": \"Read\", \"arguments\": {\"file_path\": \"/path/to/file\"}}\nDO NOT write any explanation, introduction, markdown blocks, or text before or after the JSON. Output only the raw JSON string so the parser can execute it immediately.",
 		})
 	}
 
@@ -384,6 +395,34 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 				"input": argsMap,
 			})
 		}
+	} else if jsonToolCalls, textOutside, parsed := parseRawJSONToolCall(aiResponse); parsed {
+		stopReason = "tool_use"
+		if textOutside != "" {
+			content = append(content, map[string]interface{}{
+				"type": "text",
+				"text": textOutside,
+			})
+		}
+		for _, tc := range jsonToolCalls {
+			funcMap, _ := tc["function"].(map[string]interface{})
+			name, _ := funcMap["name"].(string)
+			args := funcMap["arguments"]
+			id, _ := tc["id"].(string)
+
+			var argsMap map[string]interface{}
+			if argsStr, ok := args.(string); ok {
+				json.Unmarshal([]byte(argsStr), &argsMap)
+			} else if am, ok := args.(map[string]interface{}); ok {
+				argsMap = am
+			}
+
+			content = append(content, map[string]interface{}{
+				"type":  "tool_use",
+				"id":    id,
+				"name":  name,
+				"input": argsMap,
+			})
+		}
 	} else {
 		content = append(content, map[string]interface{}{
 			"type": "text",
@@ -500,6 +539,60 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 				}
 
 				for _, tc := range xmlToolCalls {
+					funcMap, _ := tc["function"].(map[string]interface{})
+					name, _ := funcMap["name"].(string)
+					args := funcMap["arguments"]
+					id, _ := tc["id"].(string)
+
+					argsBytes, _ := json.Marshal(args)
+					argsStr := string(argsBytes)
+
+					toolBlockStart := map[string]interface{}{
+						"type":  "content_block_start",
+						"index": 1,
+						"content_block": map[string]interface{}{
+							"type": "tool_use",
+							"id":   id,
+							"name": name,
+						},
+					}
+					tbsBytes, _ := json.Marshal(toolBlockStart)
+					fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
+
+					toolBlockDelta := map[string]interface{}{
+						"type":  "content_block_delta",
+						"index": 1,
+						"delta": map[string]interface{}{
+							"type":         "input_json_delta",
+							"partial_json": argsStr,
+						},
+					}
+					tbdBytes, _ := json.Marshal(toolBlockDelta)
+					fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
+
+					toolBlockStop := map[string]interface{}{
+						"type":  "content_block_stop",
+						"index": 1,
+					}
+					tbstBytes, _ := json.Marshal(toolBlockStop)
+					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
+				}
+			} else if jsonToolCalls, textOutside, parsed := parseRawJSONToolCall(bufStr); parsed {
+				hasToolUse = true
+				if textOutside != "" {
+					contentBlockDelta := map[string]interface{}{
+						"type":  "content_block_delta",
+						"index": 0,
+						"delta": map[string]interface{}{
+							"type": "text_delta",
+							"text": textOutside,
+						},
+					}
+					deltaBytes, _ := json.Marshal(contentBlockDelta)
+					fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
+				}
+
+				for _, tc := range jsonToolCalls {
 					funcMap, _ := tc["function"].(map[string]interface{})
 					name, _ := funcMap["name"].(string)
 					args := funcMap["arguments"]
@@ -681,11 +774,27 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 				bufStr := streamBuffer.String()
 				trimmedBuf := strings.TrimSpace(bufStr)
 
-				// Nếu buffer bắt đầu bằng "<tools"
-				if strings.HasPrefix(trimmedBuf, "<tools") {
-					// Đã tìm thấy chuỗi kết thúc thẻ </tools> chưa
-					if strings.Contains(trimmedBuf, "</tools>") {
-						xmlToolCalls, textOutside, parsed := parseXMLToolCalls(bufStr)
+				// Nếu buffer bắt đầu bằng "<tools" hoặc "{"
+				if strings.HasPrefix(trimmedBuf, "<tools") || strings.HasPrefix(trimmedBuf, "{") {
+					isXML := strings.HasPrefix(trimmedBuf, "<tools")
+					hasEnded := false
+					if isXML {
+						hasEnded = strings.Contains(trimmedBuf, "</tools>")
+					} else {
+						hasEnded = strings.HasSuffix(trimmedBuf, "}")
+					}
+
+					if hasEnded {
+						var parsed bool
+						var toolCalls []map[string]interface{}
+						var textOutside string
+
+						if isXML {
+							toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
+						} else {
+							toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
+						}
+
 						if parsed {
 							hasToolUse = true
 							flushedBuffer = true
@@ -703,7 +812,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 								fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
 							}
 
-							for xmlIdx, tc := range xmlToolCalls {
+							for xmlIdx, tc := range toolCalls {
 								funcMap, _ := tc["function"].(map[string]interface{})
 								name, _ := funcMap["name"].(string)
 								args := funcMap["arguments"]
@@ -1349,3 +1458,43 @@ func localToolBash(args map[string]interface{}) (string, error) {
 	}
 	return output + suffix, nil
 }
+
+// parseRawJSONToolCall phân tích phản hồi dạng JSON thô {"name": "...", "arguments": {...}} của Qwen/DeepSeek.
+func parseRawJSONToolCall(text string) ([]map[string]interface{}, string, bool) {
+	trimmed := strings.TrimSpace(text)
+
+	// Tìm vị trí của dấu { đầu tiên và dấu } cuối cùng
+	startIdx := strings.Index(trimmed, "{")
+	endIdx := strings.LastIndex(trimmed, "}")
+
+	if startIdx == -1 || endIdx == -1 || endIdx <= startIdx {
+		return nil, text, false
+	}
+
+	jsonContent := trimmed[startIdx : endIdx+1]
+
+	var item map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonContent), &item); err == nil {
+		name, _ := item["name"].(string)
+		args := item["arguments"]
+		if name != "" && args != nil {
+			id := fmt.Sprintf("call_%d", time.Now().UnixNano())
+			textOutside := trimmed[:startIdx] + trimmed[endIdx+1:]
+			textOutside = strings.TrimSpace(textOutside)
+
+			// Trả về theo định dạng OpenAI ToolCall tương thích
+			return []map[string]interface{}{
+				{
+					"id":   id,
+					"type": "function",
+					"function": map[string]interface{}{
+						"name":      name,
+						"arguments": args,
+					},
+				},
+			}, textOutside, true
+		}
+	}
+	return nil, text, false
+}
+

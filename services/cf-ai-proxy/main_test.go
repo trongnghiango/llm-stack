@@ -508,3 +508,67 @@ func TestLocalToolBash_WithCwd(t *testing.T) {
 		t.Errorf("Kỳ vọng output chứa '/tmp', nhận được: %s", result)
 	}
 }
+
+func TestParseRawJSONToolCall(t *testing.T) {
+	testCases := []struct {
+		name          string
+		input         string
+		expectedName  string
+		expectedParam string
+		expectedText  string
+		shouldPass    bool
+	}{
+		{
+			name:          "JSON thô hoàn chỉnh",
+			input:         `{"name": "Read", "arguments": {"file_path": "/path/to/file.md"}}`,
+			expectedName:  "Read",
+			expectedParam: "/path/to/file.md",
+			expectedText:  "",
+			shouldPass:    true,
+		},
+		{
+			name:          "JSON đi kèm text phía trước",
+			input:         `Tôi sẽ đọc file này: {"name": "Read", "arguments": {"file_path": "/path/to/file.md"}}`,
+			expectedName:  "Read",
+			expectedParam: "/path/to/file.md",
+			expectedText:  "Tôi sẽ đọc file này:",
+			shouldPass:    true,
+		},
+		{
+			name:          "Không phải JSON tool call",
+			input:         `Đây chỉ là một câu nói bình thường.`,
+			expectedName:  "",
+			expectedParam: "",
+			expectedText:  "Đây chỉ là một câu nói bình thường.",
+			shouldPass:    false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, textOut, ok := parseRawJSONToolCall(tc.input)
+			if ok != tc.shouldPass {
+				t.Fatalf("Kỳ vọng pass=%v, nhận ok=%v", tc.shouldPass, ok)
+			}
+			if tc.shouldPass {
+				if len(res) == 0 {
+					t.Fatal("Không nhận được tool calls")
+				}
+				funcMap := res[0]["function"].(map[string]interface{})
+				name := funcMap["name"].(string)
+				if name != tc.expectedName {
+					t.Errorf("Kỳ vọng tên tool là %s, nhận được: %s", tc.expectedName, name)
+				}
+				args := funcMap["arguments"].(map[string]interface{})
+				filePath := args["file_path"].(string)
+				if filePath != tc.expectedParam {
+					t.Errorf("Kỳ vọng tham số file_path là %s, nhận được: %s", tc.expectedParam, filePath)
+				}
+				if textOut != tc.expectedText {
+					t.Errorf("Kỳ vọng text outside là '%s', nhận được: '%s'", tc.expectedText, textOut)
+				}
+			}
+		})
+	}
+}
+
