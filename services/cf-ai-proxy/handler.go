@@ -820,6 +820,22 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 		// 2. Xử lý phản hồi text thông thường
 		token, _ := cfJSON["response"].(string)
+		if token == "" {
+			if choices, ok := cfJSON["choices"].([]interface{}); ok && len(choices) > 0 {
+				if choiceMap, ok := choices[0].(map[string]interface{}); ok {
+					if deltaMap, ok := choiceMap["delta"].(map[string]interface{}); ok {
+						if content, ok := deltaMap["content"].(string); ok && content != "" {
+							token = content
+						} else if reasoning, ok := deltaMap["reasoning_content"].(string); ok && reasoning != "" {
+							token = reasoning
+						} else if reasoning2, ok := deltaMap["reasoning"].(string); ok && reasoning2 != "" {
+							token = reasoning2
+						}
+					}
+				}
+			}
+		}
+
 		if token != "" {
 			tokenCount++
 
