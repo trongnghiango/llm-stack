@@ -16,7 +16,6 @@ def sync_nim():
 
     if not os.path.exists(db_path):
         print(f"❌ Không tìm thấy file database SQLite của 9router tại {db_path}")
-        print("Vui lòng đảm bảo stack docker compose đang chạy và 9router đã được khởi chạy ít nhất một lần để tạo file DB.")
         return
 
     # 1. Đọc danh sách NIM accounts từ CSV
@@ -24,11 +23,9 @@ def sync_nim():
     try:
         with open(csv_path, mode="r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
-            # Chuẩn hóa tên cột để tránh khoảng trắng hoặc ký tự đặc biệt
             reader.fieldnames = [name.strip() for name in reader.fieldnames]
             
             for row in reader:
-                # Đảm bảo các trường bắt buộc tồn tại
                 if row.get("ID") and row.get("name") and row.get("token"):
                     accounts.append({
                         "id": row["ID"].strip(),
@@ -50,50 +47,27 @@ def sync_nim():
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-
-        # Bật foreign keys và WAL mode
         cursor.execute("PRAGMA foreign_keys = ON;")
         
-        # 3. Tạo/Cập nhật Provider Node cho NVIDIA NIM
-        node_id = "openai-compatible-nvidia-nim"
-        node_type = "openai-compatible"
-        node_name = "NVIDIA-NIM"
-        node_data = {
-            "prefix": "nvidia-nim",
-            "baseUrl": "https://integrate.api.nvidia.com/v1"
-        }
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO providerNodes (id, type, name, data, createdAt, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?);
-        """, (
-            node_id,
-            node_type,
-            node_name,
-            json.dumps(node_data),
-            datetime.now().isoformat() + "Z",
-            datetime.now().isoformat() + "Z"
-        ))
-        print(f"✅ Đã cấu hình Provider Node '{node_name}' (ID: {node_id})")
+        # 3. Dọn dẹp providerNode và providerConnection custom cũ (nếu có) để tránh rác DB
+        cursor.execute("DELETE FROM providerNodes WHERE id='openai-compatible-nvidia-nim';")
+        cursor.execute("DELETE FROM providerConnections WHERE provider='openai-compatible-nvidia-nim';")
 
-        # 4. Inject các Connections từ CSV
+        # 4. Inject các Connections loại 'nvidia' chuẩn của 9router
         injected_count = 0
         for acc in accounts:
-            conn_id = f"pconn-nvidia-nim-{acc['name']}"
+            # Dùng luôn ID trong CSV làm ID của Connection hoặc sinh UUID
+            # Để đồng bộ, ta dùng luôn ID từ CSV (ví dụ: bb0b2348-fe3c-4db7-b872-87e90...)
+            conn_id = acc["id"]
             conn_name = acc["name"]
             api_key = acc["token"]
             
-            # Cấu hình data JSON cho Connection
-            # Sử dụng model mặc định phổ biến của NVIDIA NIM là meta/llama-3.3-70b-instruct
+            # Cấu hình data JSON cho Connection loại 'nvidia'
             conn_data = {
-                "defaultModel": "meta/llama-3.3-70b-instruct",
                 "apiKey": api_key,
                 "testStatus": "unknown",
                 "providerSpecificData": {
-                    "prefix": "nvidia-nim",
-                    "baseUrl": "https://integrate.api.nvidia.com/v1",
-                    "nodeName": conn_name,
-                    "connectionProxyEnabled": 0,
+                    "connectionProxyEnabled": False,
                     "connectionProxyUrl": "",
                     "connectionNoProxy": ""
                 }
@@ -105,17 +79,17 @@ def sync_nim():
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
                 conn_id,
-                node_id,
+                "nvidia",       # Tên Provider chuẩn của 9router
                 "apikey",
                 conn_name,
-                1, # Priority mặc định
-                1, # isActive = true
+                1,              # Priority mặc định
+                1,              # isActive = true
                 json.dumps(conn_data),
                 datetime.now().isoformat() + "Z",
                 datetime.now().isoformat() + "Z"
             ))
             injected_count += 1
-            print(f"  ⚡ Đã nạp Connection: {conn_name} (ID: {conn_id})")
+            print(f"  ⚡ Đã nạp Connection: {conn_name} (ID: {conn_id}) -> Loại: nvidia")
 
         conn.commit()
         conn.close()

@@ -185,21 +185,6 @@ INSERT OR IGNORE INTO providerNodes (id, type, name, data, createdAt, updatedAt)
 );
 
 -- ---------------------------------------------------------------------------
--- Provider Node: openai-compatible → NVIDIA NIM
--- ---------------------------------------------------------------------------
-INSERT OR IGNORE INTO providerNodes (id, type, name, data, createdAt, updatedAt) VALUES (
-  'openai-compatible-nvidia-nim',
-  'openai-compatible',
-  'NVIDIA-NIM',
-  json_object(
-    'prefix',   'nvidia-nim',
-    'baseUrl',  'https://integrate.api.nvidia.com/v1'
-  ),
-  datetime('now'),
-  datetime('now')
-);
-
--- ---------------------------------------------------------------------------
 -- Provider Connections: các tài khoản CF được inject qua cf-ai-proxy
 -- cf-ai-proxy tự load balancing qua accounts.csv → chỉ cần 1 connection ở đây
 -- API key là dummy vì cf-ai-proxy không kiểm tra key từ 9router
