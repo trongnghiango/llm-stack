@@ -572,3 +572,67 @@ func TestParseRawJSONToolCall(t *testing.T) {
 	}
 }
 
+func TestParseXMLToolCalls(t *testing.T) {
+	testCases := []struct {
+		name          string
+		input         string
+		expectedName  string
+		expectedParam string
+		expectedText  string
+		shouldPass    bool
+	}{
+		{
+			name:          "Tag tools truyền thống",
+			input:         `<tools>{"name": "Read", "arguments": {"file_path": "/path/to/file.md"}}</tools>`,
+			expectedName:  "Read",
+			expectedParam: "/path/to/file.md",
+			expectedText:  "",
+			shouldPass:    true,
+		},
+		{
+			name:          "Tag tool_use mới",
+			input:         `Tôi sẽ gọi tool này: <tool_use>{"name": "Write", "arguments": {"file_path": "/path/to/new.txt"}}</tool_use>`,
+			expectedName:  "Write",
+			expectedParam: "/path/to/new.txt",
+			expectedText:  "Tôi sẽ gọi tool này:",
+			shouldPass:    true,
+		},
+		{
+			name:          "Tag tools bị lỗi hoặc rỗng",
+			input:         `<tools></tools>`,
+			expectedName:  "",
+			expectedParam: "",
+			expectedText:  "<tools></tools>",
+			shouldPass:    false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, textOut, ok := parseXMLToolCalls(tc.input)
+			if ok != tc.shouldPass {
+				t.Fatalf("Kỳ vọng pass=%v, nhận ok=%v", tc.shouldPass, ok)
+			}
+			if tc.shouldPass {
+				if len(res) == 0 {
+					t.Fatal("Không nhận được tool calls")
+				}
+				funcMap := res[0]["function"].(map[string]interface{})
+				name := funcMap["name"].(string)
+				if name != tc.expectedName {
+					t.Errorf("Kỳ vọng tên tool là %s, nhận được: %s", tc.expectedName, name)
+				}
+				args := funcMap["arguments"].(map[string]interface{})
+				filePath := args["file_path"].(string)
+				if filePath != tc.expectedParam {
+					t.Errorf("Kỳ vọng tham số file_path là %s, nhận được: %s", tc.expectedParam, filePath)
+				}
+				if textOut != tc.expectedText {
+					t.Errorf("Kỳ vọng text outside là '%s', nhận được: '%s'", tc.expectedText, textOut)
+				}
+			}
+		})
+	}
+}
+
+

@@ -774,12 +774,12 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 				bufStr := streamBuffer.String()
 				trimmedBuf := strings.TrimSpace(bufStr)
 
-				// Nếu buffer bắt đầu bằng "<tools" hoặc "{"
-				if strings.HasPrefix(trimmedBuf, "<tools") || strings.HasPrefix(trimmedBuf, "{") {
-					isXML := strings.HasPrefix(trimmedBuf, "<tools")
+				// Nếu buffer bắt đầu bằng "<tools", "<tool_use" hoặc "{"
+				if strings.HasPrefix(trimmedBuf, "<tools") || strings.HasPrefix(trimmedBuf, "<tool_use") || strings.HasPrefix(trimmedBuf, "{") {
+					isXML := strings.HasPrefix(trimmedBuf, "<tools") || strings.HasPrefix(trimmedBuf, "<tool_use")
 					hasEnded := false
 					if isXML {
-						hasEnded = strings.Contains(trimmedBuf, "</tools>")
+						hasEnded = strings.Contains(trimmedBuf, "</tools>") || strings.Contains(trimmedBuf, "</tool_use>")
 					} else {
 						hasEnded = strings.HasSuffix(trimmedBuf, "}")
 					}
@@ -1153,17 +1153,28 @@ func translateAnthropicToolChoice(toolChoice interface{}) interface{} {
 func parseXMLToolCalls(text string) ([]map[string]interface{}, string, bool) {
 	trimmed := strings.TrimSpace(text)
 
-	startIdx := strings.Index(trimmed, "<tools>")
-	endIdx := strings.Index(trimmed, "</tools>")
+	var startTag, endTag string
+	if strings.Contains(trimmed, "<tools>") && strings.Contains(trimmed, "</tools>") {
+		startTag = "<tools>"
+		endTag = "</tools>"
+	} else if strings.Contains(trimmed, "<tool_use>") && strings.Contains(trimmed, "</tool_use>") {
+		startTag = "<tool_use>"
+		endTag = "</tool_use>"
+	} else {
+		return nil, text, false
+	}
+
+	startIdx := strings.Index(trimmed, startTag)
+	endIdx := strings.Index(trimmed, endTag)
 
 	if startIdx == -1 || endIdx == -1 || endIdx <= startIdx {
 		return nil, text, false
 	}
 
-	toolsContent := trimmed[startIdx+len("<tools>") : endIdx]
+	toolsContent := trimmed[startIdx+len(startTag) : endIdx]
 	toolsContent = strings.TrimSpace(toolsContent)
 
-	textOutside := trimmed[:startIdx] + trimmed[endIdx+len("</tools>"):]
+	textOutside := trimmed[:startIdx] + trimmed[endIdx+len(endTag):]
 	textOutside = strings.TrimSpace(textOutside)
 
 	// Thử parse JSON object đơn lẻ
