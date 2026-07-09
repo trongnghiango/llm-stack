@@ -21,8 +21,8 @@ Tệp tin này lưu danh sách các tài khoản Cloudflare dùng để gọi AI
 
 ```csv
 account_id,api_token
-f694fb73_xxxxxxxx,cfut_xxxxxxxxxxxxxxxx
-a3036b15_xxxxxxxx,cfat_xxxxxxxxxxxxxxxx
+f694fb73_xxxxxxxx,cfut_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+a3036b15_xxxxxxxx,cfat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 > [!IMPORTANT]

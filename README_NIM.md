@@ -9,7 +9,7 @@ Tài liệu này hướng dẫn cách tự động nạp (sync) danh sách các 
 
 ```csv
 ID,name,token,expiration
-bb0b2348-fe3c-4db7-b872-87e90,NIM_GOON_003,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,07/09/2027
+bb0b2348-fe3c-4db7-b872-87e90,NIM_GOON_003,nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,07/09/2027
 ```
 
 *Lưu ý:*
