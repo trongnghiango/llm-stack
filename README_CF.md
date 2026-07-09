@@ -64,3 +64,33 @@ Khi bạn thêm/sửa tài khoản trong `accounts.csv` hoặc thêm model mới
    ```bash
    docker exec llm-redis redis-cli flushall
    ```
+
+---
+
+## 🛠️ 5. Quản Lý Stack Bằng Unified CLI Tool
+Để tiện lợi cho việc vận hành, hệ thống cung cấp một công cụ CLI là `./stack` ngay tại thư mục gốc để quản lý nhanh các tác vụ:
+
+- Khởi động toàn bộ stack:
+  ```bash
+  ./stack start
+  ```
+- Dừng toàn bộ stack:
+  ```bash
+  ./stack stop
+  ```
+- Khởi động lại dịch vụ cụ thể (Ví dụ: `9router`):
+  ```bash
+  ./stack restart 9router
+  ```
+- Xem trạng thái các containers:
+  ```bash
+  ./stack status
+  ```
+- Xem logs realtime của một dịch vụ:
+  ```bash
+  ./stack logs cf-ai-proxy
+  ```
+- Xóa sạch bộ nhớ đệm cache Redis:
+  ```bash
+  ./stack flush
+  ```

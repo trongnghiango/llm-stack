@@ -19,29 +19,16 @@ bb0b2348-fe3c-4db7-b872-87e90,NIM_GOON_003,nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ---
 
-## ⚡ Bước 2: Chạy script đồng bộ hóa
-Chạy script Python nằm trong thư mục `scripts/` của `llm-stack`:
+## ⚡ Bước 2: Chạy đồng bộ hóa bằng CLI tool
+Thay vì gõ nhiều lệnh đơn lẻ, bạn chỉ cần sử dụng CLI tích hợp sẵn ngay tại thư mục gốc của dự án:
 
 ```bash
-python3 scripts/sync_nim_accounts.py
+./stack sync-nim
 ```
 
-Script sẽ tự động:
-1. Đọc và phân tích file `NIM_accounts.csv`.
-2. Tạo/Cập nhật các kết nối tương ứng loại provider **`nvidia`** trong SQLite database của 9router.
-3. Đồng bộ hóa trực tiếp vào cơ sở dữ liệu thực tế đang chạy.
-
----
-
-## 🔄 Bước 3: Làm mới bộ nhớ đệm (Flush Cache)
-Vì 9router sử dụng Redis để lưu bộ nhớ đệm (cache), sau khi chạy script đồng bộ hóa, hãy chạy 2 lệnh sau để làm sạch cache và khởi động lại 9router nhận diện ngay lập tức:
-
-```bash
-# 1. Xóa sạch mọi cache cũ trong Redis
-docker exec llm-redis redis-cli flushall
-
-# 2. Khởi động lại container 9router
-docker compose restart 9router
-```
+Lệnh trên sẽ tự động thực hiện:
+1. Đọc file `NIM_accounts.csv` và import connections loại `nvidia` vào database SQLite của 9router.
+2. Xóa sạch bộ nhớ đệm (cache) trong Redis (`redis-cli flushall`).
+3. Khởi động lại container `9router` để nạp cấu hình mới.
 
 Sau khi hoàn thành, bạn chỉ cần F5/Refresh trình duyệt và truy cập quản trị 9router tại: [http://localhost:20128](http://localhost:20128) để kiểm tra các kết nối NVIDIA NIM đã hiển thị đầy đủ và xanh tươi (`active`).
