@@ -188,7 +188,7 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 				case "tool_use":
 					name, _ := blockMap["name"].(string)
 					input := blockMap["input"]
-					
+
 					inputBytes, _ := json.Marshal(input)
 					// Tái cấu trúc thành dạng JSON thô gọi tool của mô hình
 					toolCallText := fmt.Sprintf("\n{\"name\": \"%s\", \"arguments\": %s}", name, string(inputBytes))
@@ -196,7 +196,7 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 				case "tool_result":
 					hasToolResult = true
 					toolUseID, _ := blockMap["tool_use_id"].(string)
-					
+
 					var resultStr string
 					rawContent := blockMap["content"]
 					switch rc := rawContent.(type) {
@@ -315,10 +315,21 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 	bodyBytes, _ := io.ReadAll(cfBody)
 	log.Printf("[Cloudflare Raw Response (Anthropic)]: %s", string(bodyBytes))
 
-	var cfResponse map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &cfResponse); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed decode"})
+	// Guard empty response
+	if len(bodyBytes) == 0 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Empty response from Cloudflare"})
 		return
+	}
+
+	var cfResponse map[string]interface{}
+	// Attempt decode; if malformed, repair and retry
+	if err := json.Unmarshal(bodyBytes, &cfResponse); err != nil {
+		repaired := repairJSON(string(bodyBytes))
+		if err2 := json.Unmarshal([]byte(repaired), &cfResponse); err2 != nil {
+			log.Printf("[⚠️ Parse Error] original: %v, repaired: %v, raw: %s", err, err2, string(bodyBytes))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed decode Cloudflare response"})
+			return
+		}
 	}
 
 	result, ok := cfResponse["result"].(map[string]interface{})
@@ -524,19 +535,10 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 			if xmlToolCalls, textOutside, parsed := parseXMLToolCalls(bufStr); parsed {
 				hasToolUse = true
 				if textOutside != "" {
-					contentBlockDelta := map[string]interface{}{
-						"type":  "content_block_delta",
-						"index": 0,
-						"delta": map[string]interface{}{
-							"type": "text_delta",
-							"text": textOutside,
-						},
-					}
-					deltaBytes, _ := json.Marshal(contentBlockDelta)
-					fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
+					sendTextDelta(w, textOutside)
 				}
 
-				for _, tc := range xmlToolCalls {
+				for xmlIdx, tc := range xmlToolCalls {
 					funcMap, _ := tc["function"].(map[string]interface{})
 					name, _ := funcMap["name"].(string)
 					args := funcMap["arguments"]
@@ -545,9 +547,10 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 					argsBytes, _ := json.Marshal(args)
 					argsStr := string(argsBytes)
 
+					blkIdx := xmlIdx + 1
 					toolBlockStart := map[string]interface{}{
 						"type":  "content_block_start",
-						"index": 1,
+						"index": blkIdx,
 						"content_block": map[string]interface{}{
 							"type": "tool_use",
 							"id":   id,
@@ -559,7 +562,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 					toolBlockDelta := map[string]interface{}{
 						"type":  "content_block_delta",
-						"index": 1,
+						"index": blkIdx,
 						"delta": map[string]interface{}{
 							"type":         "input_json_delta",
 							"partial_json": argsStr,
@@ -570,7 +573,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 					toolBlockStop := map[string]interface{}{
 						"type":  "content_block_stop",
-						"index": 1,
+						"index": blkIdx,
 					}
 					tbstBytes, _ := json.Marshal(toolBlockStop)
 					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
@@ -578,19 +581,10 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 			} else if jsonToolCalls, textOutside, parsed := parseRawJSONToolCall(bufStr); parsed {
 				hasToolUse = true
 				if textOutside != "" {
-					contentBlockDelta := map[string]interface{}{
-						"type":  "content_block_delta",
-						"index": 0,
-						"delta": map[string]interface{}{
-							"type": "text_delta",
-							"text": textOutside,
-						},
-					}
-					deltaBytes, _ := json.Marshal(contentBlockDelta)
-					fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
+					sendTextDelta(w, textOutside)
 				}
 
-				for _, tc := range jsonToolCalls {
+				for jsonIdx, tc := range jsonToolCalls {
 					funcMap, _ := tc["function"].(map[string]interface{})
 					name, _ := funcMap["name"].(string)
 					args := funcMap["arguments"]
@@ -599,9 +593,10 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 					argsBytes, _ := json.Marshal(args)
 					argsStr := string(argsBytes)
 
+					blkIdx := jsonIdx + 1
 					toolBlockStart := map[string]interface{}{
 						"type":  "content_block_start",
-						"index": 1,
+						"index": blkIdx,
 						"content_block": map[string]interface{}{
 							"type": "tool_use",
 							"id":   id,
@@ -613,7 +608,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 					toolBlockDelta := map[string]interface{}{
 						"type":  "content_block_delta",
-						"index": 1,
+						"index": blkIdx,
 						"delta": map[string]interface{}{
 							"type":         "input_json_delta",
 							"partial_json": argsStr,
@@ -624,23 +619,14 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 					toolBlockStop := map[string]interface{}{
 						"type":  "content_block_stop",
-						"index": 1,
+						"index": blkIdx,
 					}
 					tbstBytes, _ := json.Marshal(toolBlockStop)
 					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
 				}
 			} else {
 				if bufStr != "" {
-					contentBlockDelta := map[string]interface{}{
-						"type":  "content_block_delta",
-						"index": 0,
-						"delta": map[string]interface{}{
-							"type": "text_delta",
-							"text": bufStr,
-						},
-					}
-					deltaBytes, _ := json.Marshal(contentBlockDelta)
-					fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
+					sendTextDelta(w, bufStr)
 				}
 			}
 			flushedBuffer = true
@@ -837,118 +823,98 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 				bufStr := streamBuffer.String()
 				trimmedBuf := strings.TrimSpace(bufStr)
 
-				// Nếu buffer bắt đầu bằng "<tools", "<tool_use" hoặc "{"
-				if strings.HasPrefix(trimmedBuf, "<tools") || strings.HasPrefix(trimmedBuf, "<tool_use") || strings.HasPrefix(trimmedBuf, "{") {
-					isXML := strings.HasPrefix(trimmedBuf, "<tools") || strings.HasPrefix(trimmedBuf, "<tool_use")
-					hasEnded := false
-					if isXML {
-						hasEnded = strings.Contains(trimmedBuf, "</tools>") || strings.Contains(trimmedBuf, "</tool_use>")
-					} else {
-						hasEnded = strings.HasSuffix(trimmedBuf, "}")
-					}
-
-					if hasEnded {
-						var parsed bool
-						var toolCalls []map[string]interface{}
-						var textOutside string
-
+				if trimmedBuf != "" {
+					if isPotentialToolCall(trimmedBuf) {
+						isXML := strings.HasPrefix(trimmedBuf, "<")
+						isJSON := strings.HasPrefix(trimmedBuf, "{")
+						hasEnded := false
 						if isXML {
-							toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
+							hasEnded = strings.Contains(trimmedBuf, "</tools>") || strings.Contains(trimmedBuf, "</tool_use>")
+						} else if isJSON {
+							hasEnded = strings.HasSuffix(trimmedBuf, "}")
+						}
+
+						if hasEnded {
+							var parsed bool
+							var toolCalls []map[string]interface{}
+							var textOutside string
+
+							if isXML {
+								toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
+							} else {
+								toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
+							}
+
+							if parsed {
+								hasToolUse = true
+								flushedBuffer = true
+
+								if textOutside != "" {
+									sendTextDelta(w, textOutside)
+								}
+
+								for xmlIdx, tc := range toolCalls {
+									funcMap, _ := tc["function"].(map[string]interface{})
+									name, _ := funcMap["name"].(string)
+									args := funcMap["arguments"]
+									id, _ := tc["id"].(string)
+
+									var argsMap map[string]interface{}
+									if am, ok := args.(map[string]interface{}); ok {
+										argsMap = am
+									}
+									argsBytes, _ := json.Marshal(argsMap)
+									argsStr := string(argsBytes)
+
+									blkIdx := xmlIdx + 1
+
+									toolBlockStart := map[string]interface{}{
+										"type":  "content_block_start",
+										"index": blkIdx,
+										"content_block": map[string]interface{}{
+											"type": "tool_use",
+											"id":   id,
+											"name": name,
+										},
+									}
+									tbsBytes, _ := json.Marshal(toolBlockStart)
+									fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
+
+									toolBlockDelta := map[string]interface{}{
+										"type":  "content_block_delta",
+										"index": blkIdx,
+										"delta": map[string]interface{}{
+											"type":         "input_json_delta",
+											"partial_json": argsStr,
+										},
+									}
+									tbdBytes, _ := json.Marshal(toolBlockDelta)
+									fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
+
+									toolBlockStop := map[string]interface{}{
+										"type":  "content_block_stop",
+										"index": blkIdx,
+									}
+									tbstBytes, _ := json.Marshal(toolBlockStop)
+									fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
+								}
+							}
 						} else {
-							toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
-						}
-
-						if parsed {
-							hasToolUse = true
-							flushedBuffer = true
-
-							if textOutside != "" {
-								contentBlockDelta := map[string]interface{}{
-									"type":  "content_block_delta",
-									"index": 0,
-									"delta": map[string]interface{}{
-										"type": "text_delta",
-										"text": textOutside,
-									},
-								}
-								deltaBytes, _ := json.Marshal(contentBlockDelta)
-								fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
-							}
-
-							for xmlIdx, tc := range toolCalls {
-								funcMap, _ := tc["function"].(map[string]interface{})
-								name, _ := funcMap["name"].(string)
-								args := funcMap["arguments"]
-								id, _ := tc["id"].(string)
-
-								var argsMap map[string]interface{}
-								if am, ok := args.(map[string]interface{}); ok {
-									argsMap = am
-								}
-								argsBytes, _ := json.Marshal(argsMap)
-								argsStr := string(argsBytes)
-
-								blkIdx := xmlIdx + 1
-
-								toolBlockStart := map[string]interface{}{
-									"type":  "content_block_start",
-									"index": blkIdx,
-									"content_block": map[string]interface{}{
-										"type": "tool_use",
-										"id":   id,
-										"name": name,
-									},
-								}
-								tbsBytes, _ := json.Marshal(toolBlockStart)
-								fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
-
-								toolBlockDelta := map[string]interface{}{
-									"type":  "content_block_delta",
-									"index": blkIdx,
-									"delta": map[string]interface{}{
-										"type":         "input_json_delta",
-										"partial_json": argsStr,
-									},
-								}
-								tbdBytes, _ := json.Marshal(toolBlockDelta)
-								fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
-
-								toolBlockStop := map[string]interface{}{
-									"type":  "content_block_stop",
-									"index": blkIdx,
-								}
-								tbstBytes, _ := json.Marshal(toolBlockStop)
-								fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
+							// Safety cap: nếu buffer quá lớn (1000 ký tự) hoặc bắt đầu bằng `<` nhưng sau khi đọc thêm ký tự
+							// đã vượt quá độ dài của thẻ tool_use và không khớp, flush ngay
+							if len(trimmedBuf) > 1000 || (isXML && len(trimmedBuf) >= len("<tool_use>") && !strings.HasPrefix(trimmedBuf, "<tools") && !strings.HasPrefix(trimmedBuf, "<tool_use")) {
+								flushedBuffer = true
+								sendTextDelta(w, bufStr)
 							}
 						}
-					}
-				} else {
-					// Nếu có ký tự lạ không khớp hoặc độ dài buffer đã lớn (> 15 ký tự), flush
-					if len(trimmedBuf) >= 15 || strings.Contains(bufStr, "\n") {
+					} else {
+						// Không phải tool call -> Bỏ qua buffer và phát trực tiếp ngay lập tức
 						flushedBuffer = true
-						contentBlockDelta := map[string]interface{}{
-							"type":  "content_block_delta",
-							"index": 0,
-							"delta": map[string]interface{}{
-								"type": "text_delta",
-								"text": bufStr,
-							},
-						}
-						deltaBytes, _ := json.Marshal(contentBlockDelta)
-						fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
+						sendTextDelta(w, bufStr)
 					}
 				}
 			} else {
-				contentBlockDelta := map[string]interface{}{
-					"type":  "content_block_delta",
-					"index": 0,
-					"delta": map[string]interface{}{
-						"type": "text_delta",
-						"text": token,
-					},
-				}
-				deltaBytes, _ := json.Marshal(contentBlockDelta)
-				fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
+				sendTextDelta(w, token)
 			}
 		}
 
@@ -1086,10 +1052,21 @@ func (h *ProxyHandler) handleStandard(c *gin.Context, cfBody io.Reader, accountI
 	bodyBytes, _ := io.ReadAll(cfBody)
 	log.Printf("[Cloudflare Raw Response]: %s", string(bodyBytes))
 
-	var cfResponse map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &cfResponse); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed decode"})
+	// Guard empty response
+	if len(bodyBytes) == 0 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Empty response from Cloudflare"})
 		return
+	}
+
+	var cfResponse map[string]interface{}
+	// Attempt decode; if malformed, repair and retry
+	if err := json.Unmarshal(bodyBytes, &cfResponse); err != nil {
+		repaired := repairJSON(string(bodyBytes))
+		if err2 := json.Unmarshal([]byte(repaired), &cfResponse); err2 != nil {
+			log.Printf("[⚠️ Parse Error] original: %v, repaired: %v, raw: %s", err, err2, string(bodyBytes))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed decode Cloudflare response"})
+			return
+		}
 	}
 
 	result, ok := cfResponse["result"].(map[string]interface{})
@@ -1216,27 +1193,42 @@ func parseXMLToolCalls(text string) ([]map[string]interface{}, string, bool) {
 	trimmed := strings.TrimSpace(text)
 
 	var startTag, endTag string
-	if strings.Contains(trimmed, "<tools>") && strings.Contains(trimmed, "</tools>") {
+	var hasStartTag bool
+	if strings.Contains(trimmed, "<tools>") {
 		startTag = "<tools>"
 		endTag = "</tools>"
-	} else if strings.Contains(trimmed, "<tool_use>") && strings.Contains(trimmed, "</tool_use>") {
+		hasStartTag = true
+	} else if strings.Contains(trimmed, "<tool_use>") {
 		startTag = "<tool_use>"
 		endTag = "</tool_use>"
-	} else {
+		hasStartTag = true
+	}
+
+	if !hasStartTag {
 		return nil, text, false
 	}
 
 	startIdx := strings.Index(trimmed, startTag)
 	endIdx := strings.Index(trimmed, endTag)
 
-	if startIdx == -1 || endIdx == -1 || endIdx <= startIdx {
+	var toolsContent string
+	var textOutside string
+
+	if startIdx == -1 {
 		return nil, text, false
 	}
 
-	toolsContent := trimmed[startIdx+len(startTag) : endIdx]
+	if endIdx == -1 || endIdx <= startIdx {
+		// Bị cụt mất thẻ đóng, parse phần nội dung đã nhận từ thẻ mở đến hết
+		toolsContent = trimmed[startIdx+len(startTag):]
+		textOutside = trimmed[:startIdx]
+		// Sửa lỗi JSON bị cắt cụt bên trong thẻ XML
+		toolsContent = repairJSON(toolsContent)
+	} else {
+		toolsContent = trimmed[startIdx+len(startTag) : endIdx]
+		textOutside = trimmed[:startIdx] + trimmed[endIdx+len(endTag):]
+	}
 	toolsContent = strings.TrimSpace(toolsContent)
-
-	textOutside := trimmed[:startIdx] + trimmed[endIdx+len(endTag):]
 	textOutside = strings.TrimSpace(textOutside)
 
 	// Thử parse JSON object đơn lẻ
@@ -1291,8 +1283,10 @@ func parseXMLToolCalls(text string) ([]map[string]interface{}, string, bool) {
 		if line == "" {
 			continue
 		}
+		// Cố gắng sửa lỗi dòng đơn lẻ bị cụt trước khi unmarshal
+		repairedLine := repairJSON(line)
 		var item map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &item); err == nil {
+		if err := json.Unmarshal([]byte(repairedLine), &item); err == nil {
 			name, _ := item["name"].(string)
 			arguments := item["arguments"]
 			if name != "" {
@@ -1536,15 +1530,26 @@ func localToolBash(args map[string]interface{}) (string, error) {
 func parseRawJSONToolCall(text string) ([]map[string]interface{}, string, bool) {
 	trimmed := strings.TrimSpace(text)
 
-	// Tìm vị trí của dấu { đầu tiên và dấu } cuối cùng
+	// Tìm vị trí của dấu { đầu tiên
 	startIdx := strings.Index(trimmed, "{")
-	endIdx := strings.LastIndex(trimmed, "}")
-
-	if startIdx == -1 || endIdx == -1 || endIdx <= startIdx {
+	if startIdx == -1 {
 		return nil, text, false
 	}
 
-	jsonContent := trimmed[startIdx : endIdx+1]
+	endIdx := strings.LastIndex(trimmed, "}")
+	var jsonContent string
+	var textOutside string
+
+	if endIdx == -1 || endIdx <= startIdx {
+		// Bị cụt mất ngoặc đóng cuối, sử dụng repairJSON
+		jsonContent = trimmed[startIdx:]
+		jsonContent = repairJSON(jsonContent)
+		textOutside = trimmed[:startIdx]
+	} else {
+		jsonContent = trimmed[startIdx : endIdx+1]
+		textOutside = trimmed[:startIdx] + trimmed[endIdx+1:]
+	}
+	textOutside = strings.TrimSpace(textOutside)
 
 	var item map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonContent), &item); err == nil {
@@ -1552,10 +1557,6 @@ func parseRawJSONToolCall(text string) ([]map[string]interface{}, string, bool) 
 		args := item["arguments"]
 		if name != "" && args != nil {
 			id := fmt.Sprintf("call_%d", time.Now().UnixNano())
-			textOutside := trimmed[:startIdx] + trimmed[endIdx+1:]
-			textOutside = strings.TrimSpace(textOutside)
-
-			// Trả về theo định dạng OpenAI ToolCall tương thích
 			return []map[string]interface{}{
 				{
 					"id":   id,
@@ -1571,3 +1572,83 @@ func parseRawJSONToolCall(text string) ([]map[string]interface{}, string, bool) 
 	return nil, text, false
 }
 
+// isPotentialToolCall kiểm tra xem token đầu vào có khả năng bắt đầu cuộc gọi tool hay không.
+func isPotentialToolCall(s string) bool {
+	if strings.HasPrefix(s, "{") {
+		return true
+	}
+	if strings.HasPrefix(s, "<") {
+		if len(s) < len("<tool_use>") {
+			return strings.HasPrefix("<tools>", s) || strings.HasPrefix("<tool_use>", s)
+		}
+		return strings.HasPrefix(s, "<tools") || strings.HasPrefix(s, "<tool_use")
+	}
+	return false
+}
+
+// sendTextDelta gửi sự kiện content_block_delta cho client với text delta tương ứng.
+func sendTextDelta(w io.Writer, text string) {
+	contentBlockDelta := map[string]interface{}{
+		"type":  "content_block_delta",
+		"index": 0,
+		"delta": map[string]interface{}{
+			"type": "text_delta",
+			"text": text,
+		},
+	}
+	deltaBytes, _ := json.Marshal(contentBlockDelta)
+	fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(deltaBytes))
+}
+
+// repairJSON cố gắng sửa các chuỗi JSON bị cắt cụt bằng cách đóng các dấu ngoặc nháy kép, ngoặc nhọn, ngoặc vuông còn thiếu.
+func repairJSON(jsonStr string) string {
+	jsonStr = strings.TrimSpace(jsonStr)
+	if jsonStr == "" {
+		return jsonStr
+	}
+
+	var braces []rune
+	inQuote := false
+	escape := false
+
+	for _, r := range jsonStr {
+		if escape {
+			escape = false
+			continue
+		}
+		if r == '\\' {
+			escape = true
+			continue
+		}
+		if r == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if !inQuote {
+			if r == '{' || r == '[' {
+				braces = append(braces, r)
+			} else if r == '}' || r == ']' {
+				if len(braces) > 0 {
+					last := braces[len(braces)-1]
+					if (r == '}' && last == '{') || (r == ']' && last == '[') {
+						braces = braces[:len(braces)-1]
+					}
+				}
+			}
+		}
+	}
+
+	if inQuote {
+		jsonStr += "\""
+	}
+
+	for i := len(braces) - 1; i >= 0; i-- {
+		if braces[i] == '{' {
+			jsonStr += "}"
+		} else if braces[i] == '[' {
+			jsonStr += "]"
+		}
+	}
+
+	return jsonStr
+}
