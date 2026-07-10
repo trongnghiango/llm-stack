@@ -57,7 +57,7 @@ func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
 	// Vòng lặp Failover khẩn cấp chuyển đổi tài khoản khi dính lỗi
 	for i := 0; i < 3; i++ {
 		var ok bool
-		account, ok = h.sm.GetAccount(sessionID)
+		account, ok = h.sm.GetAccount(c.Request.Context(), sessionID)
 		if !ok {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Tất cả tài khoản hệ thống đã đạt ngưỡng giới hạn an toàn!"})
 			return
@@ -67,19 +67,31 @@ func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
 		var err error
 		resp, err = h.forwardToCloudflare(account, req.Model, req)
 
-		if err != nil {
-			h.sm.Penalize(account.AccountID, 5*time.Minute)
-			h.sm.BreakSession(sessionID)
+		if err != nil || resp == nil {
+			h.sm.Penalize(c.Request.Context(), account.AccountID, 5*time.Minute)
+			h.sm.BreakSession(c.Request.Context(), sessionID)
 			continue
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusUnauthorized {
 			resp.Body.Close()
-			h.sm.Penalize(account.AccountID, 12*time.Hour) // Phạt 24 tiếng nếu cạn kiệt Neurons ngày
-			h.sm.BreakSession(sessionID)
+			h.sm.Penalize(c.Request.Context(), account.AccountID, 12*time.Hour) // Phạt 24 tiếng nếu cạn kiệt Neurons ngày
+			h.sm.BreakSession(c.Request.Context(), sessionID)
+			continue
+		}
+
+		if resp.StatusCode >= 500 {
+			resp.Body.Close()
+			h.sm.Penalize(c.Request.Context(), account.AccountID, 5*time.Minute)
+			h.sm.BreakSession(c.Request.Context(), sessionID)
 			continue
 		}
 		break
+	}
+
+	if resp == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "All attempts to forward request to Cloudflare failed"})
+		return
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -262,7 +274,7 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 	// Vòng lặp Failover khẩn cấp chuyển đổi tài khoản khi dính lỗi
 	for i := 0; i < 3; i++ {
 		var ok bool
-		account, ok = h.sm.GetAccount(sessionID)
+		account, ok = h.sm.GetAccount(c.Request.Context(), sessionID)
 		if !ok {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Tất cả tài khoản hệ thống đã đạt ngưỡng giới hạn an toàn!"})
 			return
@@ -271,19 +283,31 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 		var err error
 		resp, err = h.forwardToCloudflare(account, req.Model, openAIReq)
 
-		if err != nil {
-			h.sm.Penalize(account.AccountID, 5*time.Minute)
-			h.sm.BreakSession(sessionID)
+		if err != nil || resp == nil {
+			h.sm.Penalize(c.Request.Context(), account.AccountID, 5*time.Minute)
+			h.sm.BreakSession(c.Request.Context(), sessionID)
 			continue
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusUnauthorized {
 			resp.Body.Close()
-			h.sm.Penalize(account.AccountID, 12*time.Hour)
-			h.sm.BreakSession(sessionID)
+			h.sm.Penalize(c.Request.Context(), account.AccountID, 12*time.Hour)
+			h.sm.BreakSession(c.Request.Context(), sessionID)
+			continue
+		}
+
+		if resp.StatusCode >= 500 {
+			resp.Body.Close()
+			h.sm.Penalize(c.Request.Context(), account.AccountID, 5*time.Minute)
+			h.sm.BreakSession(c.Request.Context(), sessionID)
 			continue
 		}
 		break
+	}
+
+	if resp == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "All attempts to forward request to Cloudflare failed"})
+		return
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -459,7 +483,7 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 50
 	}
-	h.sm.TrackUsage(accountID, estimatedNeurons)
+	h.sm.TrackUsage(c.Request.Context(), accountID, estimatedNeurons)
 }
 
 // handleAnthropicStream chuyển đổi và phát dòng chảy sự kiện SSE chuẩn Anthropic từ dữ liệu thô Cloudflare.
@@ -683,7 +707,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 		sendStartEvents(w)
 
 		line, err := reader.ReadString('\n')
-		if err != nil {
+		if err != nil && line == "" {
 			sendEndEvents(w)
 			return false
 		}
@@ -918,6 +942,10 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 			}
 		}
 
+		if err == io.EOF {
+			sendEndEvents(w)
+			return false
+		}
 		return true
 	})
 
@@ -925,7 +953,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 10
 	}
-	h.sm.TrackUsage(accountID, estimatedNeurons)
+	h.sm.TrackUsage(c.Request.Context(), accountID, estimatedNeurons)
 }
 
 // estimatePromptTokens ước lượng số lượng tokens của prompt đầu vào bao gồm cả tin nhắn và định nghĩa công cụ.
@@ -1026,7 +1054,7 @@ func (h *ProxyHandler) handleStream(c *gin.Context, cfBody io.Reader, accountID,
 
 	c.Stream(func(w io.Writer) bool {
 		line, err := reader.ReadString('\n')
-		if err != nil {
+		if err != nil && line == "" {
 			if err == io.EOF {
 				fmt.Fprint(w, "data: [DONE]\n\n")
 			}
@@ -1037,6 +1065,11 @@ func (h *ProxyHandler) handleStream(c *gin.Context, cfBody io.Reader, accountID,
 		if openAILine != "" {
 			fmt.Fprint(w, openAILine)
 		}
+
+		if err == io.EOF {
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			return false
+		}
 		return keepGoing
 	})
 
@@ -1044,7 +1077,7 @@ func (h *ProxyHandler) handleStream(c *gin.Context, cfBody io.Reader, accountID,
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 10
 	}
-	h.sm.TrackUsage(accountID, estimatedNeurons)
+	h.sm.TrackUsage(c.Request.Context(), accountID, estimatedNeurons)
 }
 
 // handleStandard định dạng phản hồi JSON thường (Non-stream) chuẩn OpenAI.
@@ -1097,7 +1130,7 @@ func (h *ProxyHandler) handleStandard(c *gin.Context, cfBody io.Reader, accountI
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 50
 	}
-	h.sm.TrackUsage(accountID, estimatedNeurons)
+	h.sm.TrackUsage(c.Request.Context(), accountID, estimatedNeurons)
 }
 
 // HandleListModels trả về danh sách các model đang hoạt động theo chuẩn OpenAI.
@@ -1555,7 +1588,10 @@ func parseRawJSONToolCall(text string) ([]map[string]interface{}, string, bool) 
 	if err := json.Unmarshal([]byte(jsonContent), &item); err == nil {
 		name, _ := item["name"].(string)
 		args := item["arguments"]
-		if name != "" && args != nil {
+		if name != "" {
+			if args == nil {
+				args = map[string]interface{}{}
+			}
 			id := fmt.Sprintf("call_%d", time.Now().UnixNano())
 			return []map[string]interface{}{
 				{

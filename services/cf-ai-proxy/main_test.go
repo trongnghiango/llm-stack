@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -110,13 +111,13 @@ func TestAccountLifecycleAndPenalization(t *testing.T) {
 	sm.pool = []*CFAccount{acc1, acc2}
 
 	// 1. GetAccount should return one of them (Round-Robin)
-	gotAcc, ok := sm.GetAccount("session1")
+	gotAcc, ok := sm.GetAccount(context.Background(), "session1")
 	if !ok {
 		t.Fatalf("Expected account to be available")
 	}
 
 	// 2. Track usage up to HandoffThreshold
-	sm.TrackUsage(gotAcc.AccountID, HandoffThreshold+100)
+	sm.TrackUsage(context.Background(), gotAcc.AccountID, HandoffThreshold+100)
 
 	// Since we used Lock/Unlock and put it in penalized, check if it's inactive and penalized
 	sm.mu.Lock()
@@ -140,7 +141,7 @@ func TestAccountLifecycleAndPenalization(t *testing.T) {
 	sm.mu.Unlock()
 
 	// 4. Calling GetAccount should trigger unpenalize loop
-	_, _ = sm.GetAccount("session2")
+	_, _ = sm.GetAccount(context.Background(), "session2")
 
 	// Check if acc is active again and has neurons reset to 0
 	sm.mu.Lock()
@@ -462,8 +463,8 @@ func TestLocalToolBash_ExitCodeNonZero(t *testing.T) {
 
 func TestLocalToolBash_Timeout(t *testing.T) {
 	args := map[string]interface{}{
-		"command":  "sleep 10",
-		"timeout":  float64(1), // 1 giây
+		"command": "sleep 10",
+		"timeout": float64(1), // 1 giây
 	}
 	result, err := localToolBash(args)
 	if err != nil {
@@ -634,5 +635,3 @@ func TestParseXMLToolCalls(t *testing.T) {
 		})
 	}
 }
-
-

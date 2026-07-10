@@ -33,12 +33,12 @@ type OpenAIRequest struct {
 	Model       string        `json:"model"`
 	Messages    []interface{} `json:"messages"`
 	Tools       []interface{} `json:"tools,omitempty"`       // Hỗ trợ Function/Tool Calling
-	ToolChoice  interface{}   `json:"tool_choice,omitempty"`  // Hỗ trợ cấu hình bắt buộc/tự chọn tool
+	ToolChoice  interface{}   `json:"tool_choice,omitempty"` // Hỗ trợ cấu hình bắt buộc/tự chọn tool
 	Stream      *bool         `json:"stream,omitempty"`
 	MaxTokens   *int          `json:"max_tokens,omitempty"`
 	Temperature *float64      `json:"temperature,omitempty"` // Hỗ trợ cấu hình độ sáng tạo
 	TopP        *float64      `json:"top_p,omitempty"`
-	Stop        []string      `json:"stop,omitempty"`         // Hỗ trợ chuỗi dừng sinh
+	Stop        []string      `json:"stop,omitempty"` // Hỗ trợ chuỗi dừng sinh
 	User        string        `json:"user"`
 }
 
@@ -59,14 +59,13 @@ type AnthropicRequest struct {
 	Model         string             `json:"model"`
 	Messages      []AnthropicMessage `json:"messages"`
 	System        interface{}        `json:"system,omitempty"`
-	Tools         interface{}        `json:"tools,omitempty"`         // Hỗ trợ Function/Tool Calling
-	ToolChoice    interface{}        `json:"tool_choice,omitempty"`    // Hỗ trợ bắt buộc/tự chọn tool
+	Tools         interface{}        `json:"tools,omitempty"`       // Hỗ trợ Function/Tool Calling
+	ToolChoice    interface{}        `json:"tool_choice,omitempty"` // Hỗ trợ bắt buộc/tự chọn tool
 	MaxTokens     *int               `json:"max_tokens,omitempty"`
-	Temperature   *float64           `json:"temperature,omitempty"`   // Độ sáng tạo
+	Temperature   *float64           `json:"temperature,omitempty"` // Độ sáng tạo
 	TopP          *float64           `json:"top_p,omitempty"`
 	TopK          *int               `json:"top_k,omitempty"`
 	StopSequences []string           `json:"stop_sequences,omitempty"` // Chuỗi dừng sinh
 	Stream        *bool              `json:"stream,omitempty"`
 	User          string             `json:"user,omitempty"`
 }
-

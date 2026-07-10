@@ -63,6 +63,13 @@ func (sm *SessionManager) LoadAccountsFromCSV(filePath string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	existingNeurons := make(map[string]int64)
+	existingActive := make(map[string]bool)
+	for _, acc := range sm.pool {
+		existingNeurons[acc.AccountID] = atomic.LoadInt64(&acc.CurrentNeuronsUsed)
+		existingActive[acc.AccountID] = acc.IsActive
+	}
+
 	sm.pool = nil // Reset lại pool tài khoản
 	for i, record := range records {
 		// Bỏ qua dòng tiêu đề nếu có
@@ -77,11 +84,17 @@ func (sm *SessionManager) LoadAccountsFromCSV(filePath string) error {
 		token := strings.TrimSpace(record[1])
 
 		if accID != "" && token != "" {
+			neurons := int64(0)
+			isActive := true
+			if val, ok := existingNeurons[accID]; ok {
+				neurons = val
+				isActive = existingActive[accID]
+			}
 			sm.pool = append(sm.pool, &CFAccount{
 				AccountID:          accID,
 				APIToken:           token,
-				IsActive:           true,
-				CurrentNeuronsUsed: 0,
+				IsActive:           isActive,
+				CurrentNeuronsUsed: neurons,
 			})
 		}
 	}
@@ -91,7 +104,10 @@ func (sm *SessionManager) LoadAccountsFromCSV(filePath string) error {
 
 // GetAccount lấy ra tài khoản được bám dính (Sticky) cho Session hiện tại
 // hoặc cấp phát một tài khoản mới theo giải thuật Round-Robin nếu chưa có hoặc tài khoản cũ đã bị cạn quota.
-func (sm *SessionManager) GetAccount(sessionID string) (CFAccount, bool) {
+func (sm *SessionManager) GetAccount(ctx context.Context, sessionID string) (CFAccount, bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -99,21 +115,19 @@ func (sm *SessionManager) GetAccount(sessionID string) (CFAccount, bool) {
 
 	// 1. Nếu có Redis, dùng Redis làm kho lưu trữ phân tán
 	if sm.rStore != nil && sm.rStore.active {
-		ctx := sm.rStore.ctx
-		
 		// A. Tra cứu session bám dính trong Redis
 		cachedAccID, err := sm.rStore.client.Get(ctx, "session:"+sessionID).Result()
 		if err != nil && err != redis.Nil {
 			sm.handleRedisError(err)
 		}
-		
+
 		if err == nil && cachedAccID != "" {
 			penExistsVal, penErr := sm.rStore.client.Exists(ctx, "penalty:"+cachedAccID).Result()
 			if penErr != nil {
 				sm.handleRedisError(penErr)
 			}
 			penExists := penExistsVal > 0
-			
+
 			var neuronsUsed int64 = 0
 			nVal, errVal := sm.rStore.client.Get(ctx, "neurons:"+cachedAccID).Result()
 			if errVal != nil && errVal != redis.Nil {
@@ -130,7 +144,7 @@ func (sm *SessionManager) GetAccount(sessionID string) (CFAccount, bool) {
 					}
 				}
 			}
-			
+
 			if sm.rStore.active {
 				sm.rStore.client.Del(ctx, "session:"+sessionID)
 			}
@@ -151,7 +165,7 @@ func (sm *SessionManager) GetAccount(sessionID string) (CFAccount, bool) {
 				sm.handleRedisError(penErr)
 			}
 			penExists := penExistsVal > 0
-			
+
 			var neuronsUsed int64 = 0
 			nVal, errVal := sm.rStore.client.Get(ctx, "neurons:"+acc.AccountID).Result()
 			if errVal != nil && errVal != redis.Nil {
@@ -171,7 +185,7 @@ func (sm *SessionManager) GetAccount(sessionID string) (CFAccount, bool) {
 				return *acc, true
 			}
 		}
-		
+
 		// Fallback xuống RAM cục bộ nếu trong lúc chạy Redis bị mất kết nối và active chuyển sang false
 		if !sm.rStore.active {
 			log.Println("🔄 Tự động fallback xuống RAM trong cuộc gọi GetAccount hiện tại do lỗi Redis.")
@@ -225,13 +239,15 @@ func (sm *SessionManager) GetAccount(sessionID string) (CFAccount, bool) {
 }
 
 // TrackUsage cộng dồn lượng Neurons tiêu thụ sau mỗi request thành công và khóa bảo vệ nếu chạm ngưỡng.
-func (sm *SessionManager) TrackUsage(accountID string, estimatedNeurons int64) {
+func (sm *SessionManager) TrackUsage(ctx context.Context, accountID string, estimatedNeurons int64) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	// 1. Tích lũy neurons trong Redis nếu kích hoạt
 	if sm.rStore != nil && sm.rStore.active {
-		ctx := sm.rStore.ctx
 		neuronsKey := "neurons:" + accountID
 		newUsed, err := sm.rStore.client.IncrBy(ctx, neuronsKey, estimatedNeurons).Result()
 		if err != nil {
@@ -240,9 +256,9 @@ func (sm *SessionManager) TrackUsage(accountID string, estimatedNeurons int64) {
 			if newUsed == estimatedNeurons {
 				sm.rStore.client.Expire(ctx, neuronsKey, 24*time.Hour)
 			}
-			log.Printf("[Usage Tracker - Redis] Account %s tiêu thụ thêm ~%d Neurons (Tổng: %d/%d)", 
+			log.Printf("[Usage Tracker - Redis] Account %s tiêu thụ thêm ~%d Neurons (Tổng: %d/%d)",
 				safeShortID(accountID), estimatedNeurons, newUsed, MaxNeuronsPerAccount)
-			
+
 			if newUsed >= HandoffThreshold {
 				errSet := sm.rStore.client.Set(ctx, "penalty:"+accountID, "1", 24*time.Hour).Err()
 				if errSet != nil {
@@ -258,7 +274,7 @@ func (sm *SessionManager) TrackUsage(accountID string, estimatedNeurons int64) {
 		if acc.AccountID == accountID {
 			newUsed := atomic.AddInt64(&acc.CurrentNeuronsUsed, estimatedNeurons)
 			if sm.rStore == nil || !sm.rStore.active {
-				log.Printf("[Usage Tracker - RAM] Account %s tiêu thụ thêm ~%d Neurons (Tổng: %d/%d)", 
+				log.Printf("[Usage Tracker - RAM] Account %s tiêu thụ thêm ~%d Neurons (Tổng: %d/%d)",
 					safeShortID(accountID), estimatedNeurons, newUsed, MaxNeuronsPerAccount)
 				if newUsed >= HandoffThreshold {
 					acc.IsActive = false
@@ -275,7 +291,10 @@ func (sm *SessionManager) TrackUsage(accountID string, estimatedNeurons int64) {
 }
 
 // Penalize đưa tài khoản vào danh sách đen (penalized) trong 24 giờ khi dính lỗi 429 hoặc 401.
-func (sm *SessionManager) Penalize(accountID string, duration time.Duration) {
+func (sm *SessionManager) Penalize(ctx context.Context, accountID string, duration time.Duration) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -285,7 +304,7 @@ func (sm *SessionManager) Penalize(accountID string, duration time.Duration) {
 	}
 
 	if sm.rStore != nil && sm.rStore.active {
-		err := sm.rStore.client.Set(sm.rStore.ctx, "penalty:"+accountID, "1", actualDuration).Err()
+		err := sm.rStore.client.Set(ctx, "penalty:"+accountID, "1", actualDuration).Err()
 		if err != nil {
 			sm.handleRedisError(err)
 		}
@@ -302,12 +321,15 @@ func (sm *SessionManager) Penalize(accountID string, duration time.Duration) {
 }
 
 // BreakSession bẻ gãy liên kết bám dính của Session để buộc hệ thống cấp tài khoản mới ở request sau.
-func (sm *SessionManager) BreakSession(sessionID string) {
+func (sm *SessionManager) BreakSession(ctx context.Context, sessionID string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if sm.rStore != nil && sm.rStore.active {
-		err := sm.rStore.client.Del(sm.rStore.ctx, "session:"+sessionID).Err()
+		err := sm.rStore.client.Del(ctx, "session:"+sessionID).Err()
 		if err != nil {
 			sm.handleRedisError(err)
 		}
@@ -394,16 +416,16 @@ func (sm *SessionManager) handleRedisError(err error) {
 	}
 
 	errStr := err.Error()
-	if strings.Contains(errStr, "connection refused") || 
-	   strings.Contains(errStr, "timeout") || 
-	   strings.Contains(errStr, "dial") || 
-	   strings.Contains(errStr, "broken pipe") ||
-	   strings.Contains(errStr, "EOF") {
-		
+	if strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "dial") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "EOF") {
+
 		if sm.rStore.active {
 			sm.rStore.active = false
 			log.Printf("⚠️ Lỗi kết nối Redis phát hiện tại thời điểm chạy: %v. Tự động chuyển sang chế độ dự phòng RAM cục bộ!", err)
-			
+
 			// Khởi chạy tiến trình tự động kết nối lại ở chế độ nền
 			go sm.autoReconnectRedis()
 		}
@@ -432,7 +454,7 @@ func (sm *SessionManager) autoReconnectRedis() {
 			sm.mu.Lock()
 			sm.rStore.active = true
 			log.Println("🔌 Khôi phục kết nối Redis thành công! Đã tự động chuyển lại sang chế độ lưu trữ phân tán.")
-			
+
 			// Đồng bộ trạng thái từ RAM lên Redis khi kết nối lại
 			ctxSync := sm.rStore.ctx
 			for _, acc := range sm.pool {
@@ -473,7 +495,7 @@ func (sm *SessionManager) SyncNeuronsFromCloudflare() {
 			log.Printf("[Sync] Không thể kết nối Cloudflare GraphQL API cho tài khoản %s: %v", safeShortID(acc.AccountID), err)
 			continue
 		}
-		
+
 		body, errRead := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if errRead != nil || resp.StatusCode != http.StatusOK {
@@ -503,25 +525,25 @@ func (sm *SessionManager) SyncNeuronsFromCloudflare() {
 				log.Printf("[Sync] Cloudflare trả về lỗi cho tài khoản %s: %s (Có thể do chưa phân quyền Account Analytics: Read)", safeShortID(acc.AccountID), gqlResp.Errors[0].Message)
 				continue
 			}
-			
+
 			if len(gqlResp.Data.Viewer.Accounts) > 0 {
 				accData := gqlResp.Data.Viewer.Accounts[0]
 				var neuronsUsed int64 = 0
-				
+
 				if len(accData.AiInferenceAdaptiveGroups) > 0 {
 					neuronsFloat := accData.AiInferenceAdaptiveGroups[0].Sum.TotalNeurons
 					neuronsUsed = int64(neuronsFloat)
 				}
-				
+
 				// Đồng bộ vào RAM cục bộ
 				atomic.StoreInt64(&acc.CurrentNeuronsUsed, neuronsUsed)
-				
+
 				// Đồng bộ vào Redis nếu có
 				if sm.rStore != nil && sm.rStore.active {
 					ctx := sm.rStore.ctx
 					sm.rStore.client.Set(ctx, "neurons:"+acc.AccountID, neuronsUsed, 24*time.Hour)
 				}
-				
+
 				log.Printf("[Sync - Cloudflare] Đồng bộ thành công %s: %d Neurons đã dùng hôm nay", safeShortID(acc.AccountID), neuronsUsed)
 
 				// Khóa/Phạt nếu chạm ngưỡng
@@ -548,4 +570,3 @@ func (sm *SessionManager) SyncNeuronsFromCloudflare() {
 		}
 	}
 }
-

@@ -27,7 +27,7 @@ func main() {
 
 	// Khởi tạo bộ quản lý session kèm RedisStore
 	sm := NewSessionManager(rStore)
-	
+
 	// Nạp danh sách Account ID và API Token của Cloudflare từ file CSV
 	if err := sm.LoadAccountsFromCSV("accounts.csv"); err != nil {
 		log.Fatalf("❌ Lỗi nghiêm trọng không thể đọc file accounts.csv: %v", err)
