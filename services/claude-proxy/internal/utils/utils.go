@@ -17,9 +17,12 @@ func getEnvInt(key string, fallback int) int {
 	return fallback
 }
 
-// getEnvDuration reads an env var representing seconds, returns fallback duration if missing or invalid.
+// getEnvDuration reads an env var representing seconds or a duration string (e.g. "120s"), returns fallback duration if missing or invalid.
 func getEnvDuration(key string, fallback time.Duration) time.Duration {
 	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			return time.Duration(i) * time.Second
 		}

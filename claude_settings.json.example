@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:20129",
+    "ANTHROPIC_AUTH_TOKEN": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "swe.architect",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "swe.engineer",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "swe.subagent",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "swe.utility",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION": "swe.knowledge",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "LLM for write docs",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Paid model",
+    "API_TIMEOUT_MS": "600000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"
+  },
+  "model": "sonnet",
+  "effortLevel": "high",
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark-daltonized",
+  "switchModelsOnFlag": false,
+  "hasCompletedOnboarding": true
+}
