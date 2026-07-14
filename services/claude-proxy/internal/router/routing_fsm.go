@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"regexp"
 
 	"claude-proxy/internal/logger"
 	"claude-proxy/internal/metrics"
@@ -34,6 +35,37 @@ func resolveDynamic(originalModel, prompt string, useLLM bool) string {
 	// Snapshot state once: guarantees cfg and maps are from the same atomic generation.
 	st := GetState()
 	cfg := st.Config
+
+	// Heuristic pre‑filter: apply selection rules before any cache or LLM call.
+	tokenCount := len(strings.Fields(prompt))
+	matched := false
+	for _, rule := range st.SelectionRules {
+		if rule.Pattern != "" {
+			re := regexp.MustCompile(rule.Pattern)
+			if re.MatchString(prompt) {
+				resolvedModel = rule.TargetModel
+				metrics.HeuristicMatchesTotal.Inc()
+				logger.Infof("[Router] Vì %s nên định tuyến (heuristic) đến %s", rule.Description, resolvedModel)
+				matched = true
+				break
+			}
+		}
+		if rule.MinTokens != 0 || rule.MaxTokens != 0 {
+			minOK := rule.MinTokens == 0 || tokenCount >= rule.MinTokens
+			maxOK := rule.MaxTokens == 0 || tokenCount <= rule.MaxTokens
+			if minOK && maxOK {
+				resolvedModel = rule.TargetModel
+				metrics.HeuristicMatchesTotal.Inc()
+				logger.Infof("[Router] Vì %s nên định tuyến (heuristic) đến %s", rule.Description, resolvedModel)
+				matched = true
+				break
+			}
+		}
+	}
+	if matched {
+		return resolvedModel
+	}
+	metrics.HeuristicMissesTotal.Inc()
 
 	for cur != stateDone {
 		switch cur {
