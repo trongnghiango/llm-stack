@@ -635,3 +635,44 @@ func TestParseXMLToolCalls(t *testing.T) {
 		})
 	}
 }
+
+func TestParseThinkingTags(t *testing.T) {
+	testCases := []struct {
+		input           string
+		expectedThink   string
+		expectedContent string
+	}{
+		{
+			input:           "<think>some thoughts</think>answer",
+			expectedThink:   "some thoughts",
+			expectedContent: "answer",
+		},
+		{
+			input:           "<think>some thoughts</think>",
+			expectedThink:   "some thoughts",
+			expectedContent: "",
+		},
+		{
+			input:           "answer",
+			expectedThink:   "",
+			expectedContent: "answer",
+		},
+		{
+			input:           "<think>unclosed thoughts",
+			expectedThink:   "unclosed thoughts",
+			expectedContent: "",
+		},
+	}
+
+	for idx, tc := range testCases {
+		t.Run(fmt.Sprintf("Case-%d", idx), func(t *testing.T) {
+			think, content := parseThinkingTags(tc.input)
+			if think != tc.expectedThink {
+				t.Errorf("Kỳ vọng think='%s', nhận được: '%s'", tc.expectedThink, think)
+			}
+			if content != tc.expectedContent {
+				t.Errorf("Kỳ vọng content='%s', nhận được: '%s'", tc.expectedContent, content)
+			}
+		})
+	}
+}

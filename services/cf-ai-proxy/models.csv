@@ -4,6 +4,7 @@
 # QUY ƯỚC QUAN TRỌNG:
 # - Các alias tuyệt đối KHÔNG chứa ký tự gạch chéo `/` để tránh lỗi định tuyến 9router.
 # ==============================================================================
+glm-4.7-flash,@cf/zai-org/glm-4.7-flash
 
 # --- Mappings Hiện Tại cho Claude Code / 9router (Không chứa /) ---
 deepseek-r1-distill-qwen-32b,@cf/deepseek-ai/deepseek-r1-distill-qwen-32b

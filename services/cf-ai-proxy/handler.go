@@ -197,6 +197,10 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 					if txt, ok := blockMap["text"].(string); ok {
 						textParts = append(textParts, txt)
 					}
+				case "thinking":
+					if thinkingText, ok := blockMap["thinking"].(string); ok {
+						textParts = append(textParts, fmt.Sprintf("<think>\n%s\n</think>\n", thinkingText))
+					}
 				case "tool_use":
 					name, _ := blockMap["name"].(string)
 					input := blockMap["input"]
@@ -259,16 +263,28 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 
 	// 3. Khởi dựng OpenAIRequest giả lập để chuyển tiếp sang API Cloudflare
 	openAIReq := OpenAIRequest{
-		Model:       req.Model,
-		Messages:    openAIMessages,
-		Tools:       translateAnthropicTools(req.Tools),
-		ToolChoice:  translateAnthropicToolChoice(req.ToolChoice),
-		Stream:      req.Stream,
-		MaxTokens:   req.MaxTokens,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stop:        req.StopSequences,
-		User:        req.User,
+		Model:               req.Model,
+		Messages:            openAIMessages,
+		Tools:               translateAnthropicTools(req.Tools),
+		ToolChoice:          translateAnthropicToolChoice(req.ToolChoice),
+		Stream:              req.Stream,
+		MaxTokens:           req.MaxTokens,
+		MaxCompletionTokens: req.MaxTokens, // Gán song song cho các mô hình reasoning
+		Temperature:         req.Temperature,
+		TopP:                req.TopP,
+		Stop:                req.StopSequences,
+		User:                req.User,
+	}
+
+	// Ánh xạ mức nỗ lực suy nghĩ (Reasoning Effort)
+	if req.Effort != "" {
+		openAIReq.ReasoningEffort = req.Effort
+	} else if req.Thinking != nil {
+		if tm, ok := req.Thinking.(map[string]interface{}); ok {
+			if effortVal, ok := tm["effort"].(string); ok {
+				openAIReq.ReasoningEffort = effortVal
+			}
+		}
 	}
 
 	// Vòng lặp Failover khẩn cấp chuyển đổi tài khoản khi dính lỗi
@@ -372,6 +388,16 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 	var content []map[string]interface{}
 	stopReason := "end_turn"
 
+	// Tách biệt phần suy nghĩ (thinking) nếu có thẻ <think>
+	thinkingPart, mainText := parseThinkingTags(aiResponse)
+	if thinkingPart != "" {
+		content = append(content, map[string]interface{}{
+			"type":     "thinking",
+			"thinking": thinkingPart,
+		})
+		aiResponse = mainText
+	}
+
 	if toolCalls, exists := result["tool_calls"].([]interface{}); exists && len(toolCalls) > 0 {
 		stopReason = "tool_use"
 		for _, tc := range toolCalls {
@@ -453,10 +479,12 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 			})
 		}
 	} else {
-		content = append(content, map[string]interface{}{
-			"type": "text",
-			"text": aiResponse,
-		})
+		if aiResponse != "" || len(content) == 0 {
+			content = append(content, map[string]interface{}{
+				"type": "text",
+				"text": aiResponse,
+			})
+		}
 	}
 
 	outputTokens := int64(len(aiResponse) / 4)
@@ -515,16 +543,6 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 	}
 	msgStartBytes, _ := json.Marshal(messageStart)
 
-	contentBlockStart := map[string]interface{}{
-		"type":  "content_block_start",
-		"index": 0,
-		"content_block": map[string]interface{}{
-			"type": "text",
-			"text": "",
-		},
-	}
-	blockStartBytes, _ := json.Marshal(contentBlockStart)
-
 	var tokenCount int64 = 0
 	var started bool = false
 	var ended bool = false
@@ -538,13 +556,65 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 	var streamBuffer strings.Builder
 	var flushedBuffer bool = false
 
+	// Máy trạng thái cho streaming suy nghĩ (thinking) và text
+	var activeBlockType string // "thinking" or "text"
+	var activeBlockIndex int   // 0, 1...
+	var activeBlockStarted bool
+	var thinkingEnded bool
+
+	sendStartBlock := func(w io.Writer, bType string, idx int) {
+		blockStartEvent := map[string]interface{}{
+			"type":  "content_block_start",
+			"index": idx,
+			"content_block": map[string]interface{}{
+				"type": bType,
+			},
+		}
+		if bType == "text" {
+			blockStartEvent["content_block"].(map[string]interface{})["text"] = ""
+		}
+		bsBytes, _ := json.Marshal(blockStartEvent)
+		fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(bsBytes))
+	}
+
+	sendDeltaBlock := func(w io.Writer, bType string, idx int, text string) {
+		var deltaType string
+		if bType == "thinking" {
+			deltaType = "thinking_delta"
+		} else {
+			deltaType = "text_delta"
+		}
+		blockDeltaEvent := map[string]interface{}{
+			"type":  "content_block_delta",
+			"index": idx,
+			"delta": map[string]interface{}{
+				"type": deltaType,
+			},
+		}
+		if bType == "thinking" {
+			blockDeltaEvent["delta"].(map[string]interface{})["thinking"] = text
+		} else {
+			blockDeltaEvent["delta"].(map[string]interface{})["text"] = text
+		}
+		bdBytes, _ := json.Marshal(blockDeltaEvent)
+		fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(bdBytes))
+	}
+
+	sendStopBlock := func(w io.Writer, idx int) {
+		blockStopEvent := map[string]interface{}{
+			"type":  "content_block_stop",
+			"index": idx,
+		}
+		bstBytes, _ := json.Marshal(blockStopEvent)
+		fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(bstBytes))
+	}
+
 	sendStartEvents := func(w io.Writer) {
 		if started {
 			return
 		}
 		started = true
 		fmt.Fprintf(w, "event: message_start\ndata: %s\n\n", string(msgStartBytes))
-		fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(blockStartBytes))
 	}
 
 	sendEndEvents := func(w io.Writer) {
@@ -559,9 +629,10 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 			if xmlToolCalls, textOutside, parsed := parseXMLToolCalls(bufStr); parsed {
 				hasToolUse = true
 				if textOutside != "" {
-					sendTextDelta(w, textOutside)
+					sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
 				}
 
+				toolBlockIndexOffset := activeBlockIndex + 1
 				for xmlIdx, tc := range xmlToolCalls {
 					funcMap, _ := tc["function"].(map[string]interface{})
 					name, _ := funcMap["name"].(string)
@@ -571,7 +642,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 					argsBytes, _ := json.Marshal(args)
 					argsStr := string(argsBytes)
 
-					blkIdx := xmlIdx + 1
+					blkIdx := xmlIdx + toolBlockIndexOffset
 					toolBlockStart := map[string]interface{}{
 						"type":  "content_block_start",
 						"index": blkIdx,
@@ -605,9 +676,10 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 			} else if jsonToolCalls, textOutside, parsed := parseRawJSONToolCall(bufStr); parsed {
 				hasToolUse = true
 				if textOutside != "" {
-					sendTextDelta(w, textOutside)
+					sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
 				}
 
+				toolBlockIndexOffset := activeBlockIndex + 1
 				for jsonIdx, tc := range jsonToolCalls {
 					funcMap, _ := tc["function"].(map[string]interface{})
 					name, _ := funcMap["name"].(string)
@@ -617,7 +689,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 					argsBytes, _ := json.Marshal(args)
 					argsStr := string(argsBytes)
 
-					blkIdx := jsonIdx + 1
+					blkIdx := jsonIdx + toolBlockIndexOffset
 					toolBlockStart := map[string]interface{}{
 						"type":  "content_block_start",
 						"index": blkIdx,
@@ -650,27 +722,40 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 				}
 			} else {
 				if bufStr != "" {
-					sendTextDelta(w, bufStr)
+					if activeBlockType == "" {
+						activeBlockType = "text"
+						activeBlockIndex = 0
+						sendStartBlock(w, "text", 0)
+						activeBlockStarted = true
+						thinkingEnded = true
+					}
+					sendDeltaBlock(w, "text", activeBlockIndex, bufStr)
 				}
 			}
 			flushedBuffer = true
 		}
 
-		// Gửi content_block_stop cho text block (index 0)
-		contentBlockStop := map[string]interface{}{
-			"type":  "content_block_stop",
-			"index": 0,
+		if activeBlockType == "" {
+			activeBlockType = "text"
+			activeBlockIndex = 0
+			sendStartBlock(w, "text", 0)
+			activeBlockStarted = true
+			thinkingEnded = true
 		}
-		blockStopBytes, _ := json.Marshal(contentBlockStop)
-		fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(blockStopBytes))
+
+		// Gửi content_block_stop cho block đang active
+		if activeBlockStarted {
+			sendStopBlock(w, activeBlockIndex)
+		}
 
 		// Gửi content_block_stop cho toàn bộ các tool blocks đã khởi động
 		if hasToolUse {
+			toolBlockIndexOffset := activeBlockIndex + 1
 			for tIdx, sent := range sentToolStart {
 				if sent {
 					toolStopBlk := map[string]interface{}{
 						"type":  "content_block_stop",
-						"index": tIdx + 1,
+						"index": tIdx + toolBlockIndexOffset,
 					}
 					stopBytes, _ := json.Marshal(toolStopBlk)
 					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(stopBytes))
@@ -753,6 +838,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 		if len(openAIToolCalls) > 0 {
 			hasToolUse = true
+			toolBlockIndexOffset := activeBlockIndex + 1
 			for _, tc := range openAIToolCalls {
 				tcMap, ok := tc.(map[string]interface{})
 				if !ok {
@@ -793,7 +879,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 				if !sentToolStart[tIdx] && toolIDs[tIdx] != "" && toolNames[tIdx] != "" {
 					toolBlockStart := map[string]interface{}{
 						"type":  "content_block_start",
-						"index": tIdx + 1,
+						"index": tIdx + toolBlockIndexOffset,
 						"content_block": map[string]interface{}{
 							"type": "tool_use",
 							"id":   toolIDs[tIdx],
@@ -809,7 +895,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 				if argsDelta != "" && sentToolStart[tIdx] {
 					toolBlockDelta := map[string]interface{}{
 						"type":  "content_block_delta",
-						"index": tIdx + 1,
+						"index": tIdx + toolBlockIndexOffset,
 						"delta": map[string]interface{}{
 							"type":         "input_json_delta",
 							"partial_json": argsDelta,
@@ -823,6 +909,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 
 		// 2. Xử lý phản hồi text thông thường
 		token, _ := cfJSON["response"].(string)
+		isReasoningToken := false
 		if token == "" {
 			if choices, ok := cfJSON["choices"].([]interface{}); ok && len(choices) > 0 {
 				if choiceMap, ok := choices[0].(map[string]interface{}); ok {
@@ -831,8 +918,10 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 							token = content
 						} else if reasoning, ok := deltaMap["reasoning_content"].(string); ok && reasoning != "" {
 							token = reasoning
+							isReasoningToken = true
 						} else if reasoning2, ok := deltaMap["reasoning"].(string); ok && reasoning2 != "" {
 							token = reasoning2
+							isReasoningToken = true
 						}
 					}
 				}
@@ -842,103 +931,160 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 		if token != "" {
 			tokenCount++
 
-			if !flushedBuffer {
-				streamBuffer.WriteString(token)
-				bufStr := streamBuffer.String()
-				trimmedBuf := strings.TrimSpace(bufStr)
+			// Lọc và chuyển đổi theo máy trạng thái suy nghĩ
+			// Phát hiện bắt đầu suy nghĩ
+			if (isReasoningToken || strings.Contains(token, "<think>")) && !thinkingEnded {
+				if activeBlockType == "" {
+					activeBlockType = "thinking"
+					activeBlockIndex = 0
+					sendStartBlock(w, "thinking", 0)
+					activeBlockStarted = true
+				}
+			}
 
-				if trimmedBuf != "" {
-					if isPotentialToolCall(trimmedBuf) {
-						isXML := strings.HasPrefix(trimmedBuf, "<")
-						isJSON := strings.HasPrefix(trimmedBuf, "{")
-						hasEnded := false
-						if isXML {
-							hasEnded = strings.Contains(trimmedBuf, "</tools>") || strings.Contains(trimmedBuf, "</tool_use>")
-						} else if isJSON {
-							hasEnded = strings.HasSuffix(trimmedBuf, "}")
-						}
+			// Nếu token chứa thẻ <think>, bóc tách
+			if strings.Contains(token, "<think>") {
+				parts := strings.Split(token, "<think>")
+				token = ""
+				if len(parts) > 1 {
+					token = parts[1]
+				}
+			}
 
-						if hasEnded {
-							var parsed bool
-							var toolCalls []map[string]interface{}
-							var textOutside string
+			// Phát hiện kết thúc suy nghĩ
+			if strings.Contains(token, "</think>") && !thinkingEnded {
+				parts := strings.Split(token, "</think>")
+				thinkingPart := parts[0]
+				textPart := ""
+				if len(parts) > 1 {
+					textPart = parts[1]
+				}
 
-							if isXML {
-								toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
+				if thinkingPart != "" && activeBlockType == "thinking" {
+					sendDeltaBlock(w, "thinking", activeBlockIndex, thinkingPart)
+				}
+
+				// Kết thúc block suy nghĩ
+				sendStopBlock(w, activeBlockIndex)
+
+				// Khởi chạy block text tiếp theo
+				activeBlockType = "text"
+				activeBlockIndex++
+				sendStartBlock(w, "text", activeBlockIndex)
+				thinkingEnded = true
+				activeBlockStarted = true
+
+				token = textPart
+			}
+
+			if token != "" {
+				if activeBlockType == "thinking" {
+					sendDeltaBlock(w, "thinking", activeBlockIndex, token)
+				} else {
+					// Nếu chưa khởi chạy block text nào, khởi chạy ngay
+					if activeBlockType == "" {
+						activeBlockType = "text"
+						activeBlockIndex = 0
+						sendStartBlock(w, "text", 0)
+						activeBlockStarted = true
+						thinkingEnded = true
+					}
+
+					if !flushedBuffer {
+						streamBuffer.WriteString(token)
+						bufStr := streamBuffer.String()
+						trimmedBuf := strings.TrimSpace(bufStr)
+
+						if trimmedBuf != "" {
+							if isPotentialToolCall(trimmedBuf) {
+								isXML := strings.HasPrefix(trimmedBuf, "<")
+								isJSON := strings.HasPrefix(trimmedBuf, "{")
+								hasEnded := false
+								if isXML {
+									hasEnded = strings.Contains(trimmedBuf, "</tools>") || strings.Contains(trimmedBuf, "</tool_use>")
+								} else if isJSON {
+									hasEnded = strings.HasSuffix(trimmedBuf, "}")
+								}
+
+								if hasEnded {
+									var parsed bool
+									var toolCalls []map[string]interface{}
+									var textOutside string
+
+									if isXML {
+										toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
+									} else {
+										toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
+									}
+
+									if parsed {
+										hasToolUse = true
+										flushedBuffer = true
+
+										if textOutside != "" {
+											sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
+										}
+
+										toolBlockIndexOffset := activeBlockIndex + 1
+										for xmlIdx, tc := range toolCalls {
+											funcMap, _ := tc["function"].(map[string]interface{})
+											name, _ := funcMap["name"].(string)
+											args := funcMap["arguments"]
+											id, _ := tc["id"].(string)
+
+											var argsMap map[string]interface{}
+											if am, ok := args.(map[string]interface{}); ok {
+												argsMap = am
+											}
+											argsBytes, _ := json.Marshal(argsMap)
+											argsStr := string(argsBytes)
+
+											blkIdx := xmlIdx + toolBlockIndexOffset
+
+											toolBlockStart := map[string]interface{}{
+												"type":  "content_block_start",
+												"index": blkIdx,
+												"content_block": map[string]interface{}{
+													"type": "tool_use",
+													"id":   id,
+													"name": name,
+												},
+											}
+											tbsBytes, _ := json.Marshal(toolBlockStart)
+											fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
+
+											toolBlockDelta := map[string]interface{}{
+												"type":  "content_block_delta",
+												"index": blkIdx,
+												"delta": map[string]interface{}{
+													"type":         "input_json_delta",
+													"partial_json": argsStr,
+												},
+											}
+											tbdBytes, _ := json.Marshal(toolBlockDelta)
+											fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
+
+											toolBlockStop := map[string]interface{}{
+												"type":  "content_block_stop",
+												"index": blkIdx,
+											}
+											tbstBytes, _ := json.Marshal(toolBlockStop)
+											fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
+										}
+									}
+								}
 							} else {
-								toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
-							}
-
-							if parsed {
-								hasToolUse = true
+								// Không phải định dạng gọi tool, xả sạch buffer
+								sendDeltaBlock(w, "text", activeBlockIndex, bufStr)
 								flushedBuffer = true
-
-								if textOutside != "" {
-									sendTextDelta(w, textOutside)
-								}
-
-								for xmlIdx, tc := range toolCalls {
-									funcMap, _ := tc["function"].(map[string]interface{})
-									name, _ := funcMap["name"].(string)
-									args := funcMap["arguments"]
-									id, _ := tc["id"].(string)
-
-									var argsMap map[string]interface{}
-									if am, ok := args.(map[string]interface{}); ok {
-										argsMap = am
-									}
-									argsBytes, _ := json.Marshal(argsMap)
-									argsStr := string(argsBytes)
-
-									blkIdx := xmlIdx + 1
-
-									toolBlockStart := map[string]interface{}{
-										"type":  "content_block_start",
-										"index": blkIdx,
-										"content_block": map[string]interface{}{
-											"type": "tool_use",
-											"id":   id,
-											"name": name,
-										},
-									}
-									tbsBytes, _ := json.Marshal(toolBlockStart)
-									fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
-
-									toolBlockDelta := map[string]interface{}{
-										"type":  "content_block_delta",
-										"index": blkIdx,
-										"delta": map[string]interface{}{
-											"type":         "input_json_delta",
-											"partial_json": argsStr,
-										},
-									}
-									tbdBytes, _ := json.Marshal(toolBlockDelta)
-									fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
-
-									toolBlockStop := map[string]interface{}{
-										"type":  "content_block_stop",
-										"index": blkIdx,
-									}
-									tbstBytes, _ := json.Marshal(toolBlockStop)
-									fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
-								}
-							}
-						} else {
-							// Safety cap: nếu buffer quá lớn (1000 ký tự) hoặc bắt đầu bằng `<` nhưng sau khi đọc thêm ký tự
-							// đã vượt quá độ dài của thẻ tool_use và không khớp, flush ngay
-							if len(trimmedBuf) > 1000 || (isXML && len(trimmedBuf) >= len("<tool_use>") && !strings.HasPrefix(trimmedBuf, "<tools") && !strings.HasPrefix(trimmedBuf, "<tool_use")) {
-								flushedBuffer = true
-								sendTextDelta(w, bufStr)
+								streamBuffer.Reset()
 							}
 						}
 					} else {
-						// Không phải tool call -> Bỏ qua buffer và phát trực tiếp ngay lập tức
-						flushedBuffer = true
-						sendTextDelta(w, bufStr)
+						// Nếu đã xả xong, phát thẳng token
+						sendDeltaBlock(w, "text", activeBlockIndex, token)
 					}
 				}
-			} else {
-				sendTextDelta(w, token)
 			}
 		}
 
@@ -1687,4 +1833,20 @@ func repairJSON(jsonStr string) string {
 	}
 
 	return jsonStr
+}
+
+// parseThinkingTags bóc tách thẻ <think>...</think> ra khỏi văn bản.
+func parseThinkingTags(text string) (string, string) {
+	startIdx := strings.Index(text, "<think>")
+	if startIdx == -1 {
+		return "", text
+	}
+	endIdx := strings.Index(text, "</think>")
+	if endIdx == -1 {
+		thinking := text[startIdx+len("<think>"):]
+		return strings.TrimSpace(thinking), ""
+	}
+	thinking := text[startIdx+len("<think>"):endIdx]
+	content := text[:startIdx] + text[endIdx+len("</think>"): ]
+	return strings.TrimSpace(thinking), strings.TrimSpace(content)
 }

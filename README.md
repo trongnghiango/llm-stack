@@ -35,12 +35,11 @@ cd llm-stack
 cp .env.example .env
 # Mở .env và điền CF_ACCOUNT_*_TOKEN
 
-# 3. Build và chạy
-docker compose up -d --build
+# 3. Quản lý hệ thống bằng CLI `./stack`
+./stack start
 
 # 4. Kiểm tra trạng thái
-docker compose ps
-docker compose logs -f
+./stack status
 ```
 
 ## Model Mapping
@@ -135,31 +134,54 @@ llm-stack/
     └── 9router-init.sh   ← Auto-init entrypoint
 ```
 
-## Lệnh hữu ích
+## Lệnh quản lý hệ thống (`./stack`)
+
+Dự án cung cấp CLI `./stack` thống nhất để quản trị stack.
 
 ```bash
-# Xem logs realtime
-docker compose logs -f
+# Xem hướng dẫn đầy đủ
+./stack help
 
-# Xem log của một service
-docker compose logs -f cf-ai-proxy
+# Khởi động toàn bộ stack
+./stack start
 
-# Restart một service
-docker compose restart 9router
+# Xem trạng thái các container
+./stack status
 
-# Rebuild sau khi thay đổi code
-docker compose up -d --build cf-ai-proxy
+# Xem logs thời gian thực (toàn bộ hoặc từng service)
+./stack logs
+./stack logs cf-ai-proxy
 
-# Reset 9router DB (re-seed)
-rm data/9router/db/data.sqlite
-docker compose restart 9router
+# Khởi động lại service
+./stack restart 9router
 
-# Dừng tất cả
-docker compose down
+# Xóa cache Redis
+./stack flush
 
-# Dừng và xóa volumes
-docker compose down -v
+# Đồng bộ NVIDIA NIM
+./stack sync-nim
+
+# Dừng hệ thống
+./stack stop
 ```
-heloo
-ci quan
-con meo
+
+## Cập nhật và Bảo đảm Dữ liệu (Update & Backup)
+
+Để nâng cấp dịch vụ lên phiên bản mới nhất (như `9router` hay `cf-ai-proxy`) mà không bị mất cấu hình và cơ sở dữ liệu SQLite:
+
+```bash
+# Cập nhật 9router (mặc định sẽ tự động sao lưu dữ liệu SQLite/Auth sang file nén .tar.gz trước khi pull bản mới)
+./stack update
+
+# Cập nhật một dịch vụ cụ thể
+./stack update cf-ai-proxy
+```
+
+Quá trình `update` sẽ tự động:
+1. Tạo bản sao lưu dự phòng: `9router-backup-YYYYMMDD_HHMMSS.tar.gz` (nếu cập nhật `9router`).
+2. Kéo (pull) image docker mới nhất từ hub.
+3. Restart lại duy nhất container được chỉ định mà không tắt các thành phần khác.
+
+---
+
+## Cấu trúc thư mục

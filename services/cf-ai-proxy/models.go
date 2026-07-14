@@ -30,16 +30,20 @@ type CFAccount struct {
 
 // OpenAIRequest định nghĩa cấu trúc payload của OpenAI Chat Completion Request.
 type OpenAIRequest struct {
-	Model       string        `json:"model"`
-	Messages    []interface{} `json:"messages"`
-	Tools       []interface{} `json:"tools,omitempty"`       // Hỗ trợ Function/Tool Calling
-	ToolChoice  interface{}   `json:"tool_choice,omitempty"` // Hỗ trợ cấu hình bắt buộc/tự chọn tool
-	Stream      *bool         `json:"stream,omitempty"`
-	MaxTokens   *int          `json:"max_tokens,omitempty"`
-	Temperature *float64      `json:"temperature,omitempty"` // Hỗ trợ cấu hình độ sáng tạo
-	TopP        *float64      `json:"top_p,omitempty"`
-	Stop        []string      `json:"stop,omitempty"` // Hỗ trợ chuỗi dừng sinh
-	User        string        `json:"user"`
+	Model               string        `json:"model"`
+	Messages            []interface{} `json:"messages"`
+	Tools               []interface{} `json:"tools,omitempty"`       // Hỗ trợ Function/Tool Calling
+	ToolChoice          interface{}   `json:"tool_choice,omitempty"` // Hỗ trợ cấu hình bắt buộc/tự chọn tool
+	Stream              *bool         `json:"stream,omitempty"`
+	MaxTokens           *int          `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int          `json:"max_completion_tokens,omitempty"` // Hỗ trợ reasoning models
+	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`     // Hỗ trợ khống chế suy nghĩ (none, low, medium, high)
+	Store               *bool         `json:"store,omitempty"`                 // Hỗ trợ lưu trữ context
+	ResponseFormat      interface{}   `json:"response_format,omitempty"`       // Hỗ trợ Structured Outputs
+	Temperature         *float64      `json:"temperature,omitempty"`           // Hỗ trợ cấu hình độ sáng tạo
+	TopP                *float64      `json:"top_p,omitempty"`
+	Stop                []string      `json:"stop,omitempty"` // Hỗ trợ chuỗi dừng sinh
+	User                string        `json:"user"`
 }
 
 // AnthropicContentBlock đại diện cho một khối nội dung dạng text trong request của Anthropic.
@@ -51,7 +55,7 @@ type AnthropicContentBlock struct {
 // AnthropicMessage định nghĩa cấu trúc một tin nhắn trong hội thoại của Anthropic.
 type AnthropicMessage struct {
 	Role    string      `json:"role"`
-	Content interface{} `json:"content"` // Có thể là chuỗi hoặc mảng các AnthropicContentBlock/tool_use/tool_result
+	Content interface{} `json:"content"` // Có thể là chuỗi hoặc mảng các AnthropicContentBlock/tool_use/tool_result/thinking
 }
 
 // AnthropicRequest định nghĩa cấu trúc payload của Anthropic Messages Request.
@@ -61,6 +65,8 @@ type AnthropicRequest struct {
 	System        interface{}        `json:"system,omitempty"`
 	Tools         interface{}        `json:"tools,omitempty"`       // Hỗ trợ Function/Tool Calling
 	ToolChoice    interface{}        `json:"tool_choice,omitempty"` // Hỗ trợ bắt buộc/tự chọn tool
+	Thinking      interface{}        `json:"thinking,omitempty"`    // Hỗ trợ Extended/Adaptive Thinking
+	Effort        string             `json:"effort,omitempty"`      // Mức nỗ lực suy nghĩ (low, medium, high, max)
 	MaxTokens     *int               `json:"max_tokens,omitempty"`
 	Temperature   *float64           `json:"temperature,omitempty"` // Độ sáng tạo
 	TopP          *float64           `json:"top_p,omitempty"`

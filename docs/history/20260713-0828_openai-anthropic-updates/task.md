@@ -1,0 +1,7 @@
+- `[x]` Update `models.go` with new parameters
+- `[x]` Update `handler.go` request parameter mapping
+- `[x]` Update `handler.go` history context parsing for `"thinking"` blocks
+- `[x]` Update `handler.go` non-stream response handler to parse `<think>...</think>`
+- `[x]` Update `handler.go` stream response handler with a state machine
+- `[x]` Verify proxy compilation and run test suite
+- `[x]` Create `walkthrough.md`

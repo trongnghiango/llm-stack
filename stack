@@ -26,6 +26,7 @@ show_usage() {
     echo "  logs [service]    Xem logs trực tiếp (tail logs) của toàn bộ hoặc một dịch vụ cụ thể"
     echo "  sync-nim          Đồng bộ tài khoản NVIDIA NIM từ CSV, tự động xóa cache Redis và restart 9router"
     echo "  flush             Xóa sạch bộ nhớ đệm (cache) trong Redis"
+    echo "  update [service]  Cập nhật image mới nhất cho dịch vụ (mặc định: 9router)"
     echo "  help              Hiển thị hướng dẫn này"
     echo ""
     echo "Ví dụ:"
@@ -86,6 +87,25 @@ case "$1" in
         echo -e "${YELLOW}🧹 Đang xóa sạch bộ nhớ đệm (cache) Redis...${NC}"
         docker exec llm-redis redis-cli flushall
         echo -e "${GREEN}✅ Đã xóa sạch cache Redis!${NC}"
+        ;;
+    update)
+        SERVICE="${2:-9router}"
+        echo -e "${BLUE}📦 Bắt đầu cập nhật dịch vụ: ${SERVICE}...${NC}"
+
+        if [ "$SERVICE" = "9router" ]; then
+            BACKUP_FILE="9router-backup-$(date +%Y%m%d_%H%M%S).tar.gz"
+            echo -e "${YELLOW}💾 Đang sao lưu dữ liệu 9router thành ${BACKUP_FILE}...${NC}"
+            tar -czf "$BACKUP_FILE" -C "${PROJECT_ROOT}/data" 9router
+            echo -e "${GREEN}✅ Đã sao lưu dữ liệu!${NC}"
+        fi
+
+        echo -e "${BLUE}📥 Đang tải bản dựng mới nhất cho ${SERVICE}...${NC}"
+        docker compose pull "$SERVICE"
+
+        echo -e "${GREEN}🔄 Đang tái khởi động container ${SERVICE}...${NC}"
+        docker compose up -d --no-deps "$SERVICE"
+
+        echo -e "${GREEN}🎉 Cập nhật thành công ${SERVICE}!${NC}"
         ;;
     help|*)
         show_usage
