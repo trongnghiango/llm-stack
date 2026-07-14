@@ -29,3 +29,4 @@ logs/
 .DS_Store
 Thumbs.db
 NIM_accounts.csv
+data/9router/db/backups/
