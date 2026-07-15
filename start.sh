@@ -15,7 +15,7 @@ mkdir -p "$DB_DIR"
 mkdir -p "$PROJECT_ROOT/data/redis"
 
 # Set quyền ghi ban đầu cho data volume
-chmod -R 777 "$PROJECT_ROOT/data"
+chmod -R 777 "$PROJECT_ROOT/data" || true
 
 # Ghi nhận trạng thái DB trước khi khởi động
 DB_EXISTS=true
@@ -52,7 +52,7 @@ else
 fi
 
 # Set lại quyền lần cuối cho an toàn
-chmod -R 777 "$PROJECT_ROOT/data"
+chmod -R 777 "$PROJECT_ROOT/data" || true
 
 echo "🎉 llm-stack đã được khởi động thành công!"
 docker compose ps
