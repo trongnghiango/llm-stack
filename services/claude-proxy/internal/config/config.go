@@ -45,6 +45,7 @@ type Config struct {
 	ModelSettings           map[string]ModelSetting `json:"model_settings,omitempty"`
 	PayloadLogRetentionDays int                     `json:"payload_log_retention_days,omitempty"`
 	RedactSensitivePayloads bool                    `json:"redact_sensitive_payloads,omitempty"`
+	RedisURL                string                  `json:"redis_url,omitempty"`
 }
 
 // ConfigPath stores the --config flag value for SIGHUP reload.

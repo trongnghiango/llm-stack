@@ -116,6 +116,7 @@ services:
     environment:
       - BIND_ADDR=0.0.0.0
       - HTTP_CLIENT_TIMEOUT=120
+      - REDIS_URL=redis://redis:6379
     volumes:
       # Mount config để edit không cần rebuild
       - ./services/claude-proxy/config.json:/app/config.json:ro
