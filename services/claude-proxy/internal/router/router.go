@@ -80,9 +80,9 @@ func (r *keywordRouter) Resolve(originalModel, prompt string) string {
 
 // Built-in decision mappings (for backward compatibility when config is empty)
 var builtinDecisionMap = map[string]string{
-	"MINIMAX":  "nvidia/minimaxai/minimax-m3",
-	"DEEPSEEK": "ds/deepseek-v4-flash",
-	"FALLBACK": "nvidia/stepfun-ai/step-3.7-flash",
+	"MINIMAX":  "ka.docs",
+	"DEEPSEEK": "ka.simple",
+	"FALLBACK": "ka.simple",
 }
 
 type genericResponse struct {

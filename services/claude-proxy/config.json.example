@@ -1,11 +1,11 @@
 {
   "_description": "Multi-LLM SWE Protocol — Proxy Configuration",
   "_claude_code_model_map": {
-    "ANTHROPIC_DEFAULT_OPUS_MODEL":   "swe.architect  → nvidia/openai/gpt-oss-120b",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "swe.engineer   → ag/gemini-3-flash-agent  (default)",
-    "CLAUDE_CODE_SUBAGENT_MODEL":     "swe.subagent   → ag/gemini-3-flash-agent",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL":  "swe.utility    → ds/deepseek-v4-flash | nvidia/minimaxai/minimax-m3",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION":  "swe.knowledge  → nvidia/minimaxai/minimax-m3"
+    "ANTHROPIC_DEFAULT_OPUS_MODEL":   "swe.architect  → ka.reason",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "swe.engineer   → ka.base  (default)",
+    "CLAUDE_CODE_SUBAGENT_MODEL":     "swe.subagent   → ka.base",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL":  "swe.utility    → ka.simple | ka.docs",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION":  "swe.knowledge  → ka.docs"
   },
 
   "upstream_url": "http://9router:20128",
@@ -13,7 +13,7 @@
   "upstream_api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 
   "use_llm_router": false,
-  "router_model": "nvidia/stepfun-ai/step-3.7-flash",
+  "router_model": "cf-ai-proxy/llama-3.1-8b-instruct-fp8-fast",
 
   "semantic_rules": [
     {
@@ -28,7 +28,7 @@
       "_group": "Tier 2 — Sonnet (Main coding, default model)",
       "trigger_model": "swe.engineer",
       "keywords": [],
-      "target_model": "ka.main",
+      "target_model": "ka.base",
       "description": "Engineer → Gemini Flash Agent"
     },
 
@@ -44,13 +44,13 @@
       "_group": "Tier 3 — Haiku (fast utility tasks — keyword routing, NO LLM router overhead)",
       "trigger_model": "swe.utility",
       "keywords": ["doc", "document", "readme", "explain", "markdown", "summary", "báo cáo", "tài liệu", "hướng dẫn", "chú thích", "comment"],
-      "target_model": "ka.simple",
+      "target_model": "ka.docs",
       "description": "Utility + doc keyword → MiniMax M3"
     },
     {
       "trigger_model": "swe.utility",
       "keywords": [],
-      "target_model": "ka.doc",
+      "target_model": "ka.simple",
       "description": "Utility fallback → DeepSeek (code / algorithm default)"
     },
 
@@ -58,12 +58,25 @@
       "_group": "Tier 4 — Knowledge (docs, README, ADR — custom model slot)",
       "trigger_model": "swe.knowledge",
       "keywords": [],
-      "target_model": "ka.mmm",
+      "target_model": "ka.docs",
       "description": "Knowledge → MiniMax M3"
     }
   ],
 
-  "decision_map": [],
+  "decision_map": [
+    {
+      "decision": "MINIMAX",
+      "target_model": "ka.docs"
+    },
+    {
+      "decision": "DEEPSEEK",
+      "target_model": "ka.simple"
+    },
+    {
+      "decision": "FALLBACK",
+      "target_model": "ka.simple"
+    }
+  ],
 
   "model_settings": {}
 }

@@ -207,7 +207,7 @@ func getStaticTarget(model string) string {
 		}
 	}
 	if model == "swe.utility" {
-		return "nvidia/stepfun-ai/step-3.7-flash"
+		return "ka.simple"
 	}
 	return model
 }

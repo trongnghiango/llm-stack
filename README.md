@@ -10,9 +10,9 @@ Claude Code  (ANTHROPIC_BASE_URL=http://127.0.0.1:20129)
      ▼  POST /v1/messages  model: "swe.engineer"
 claude-proxy  :20129
      │  Rewrite model name: swe.* → ka.*
-     ▼  model: "ka.xxx"
+     ▼  model: "ka.base"
 9router  :20128  [UI: http://localhost:20128]
-     │  Route ka.xxx → cf-ai-proxy/qwen-2.5-coder
+     │  Route ka.base → cf-ai-proxy/qwen-2.5-coder
      ▼  POST /v1/messages  (Anthropic format)
 cf-ai-proxy  :20127  [internal only]
      │  Convert Anthropic ↔ Cloudflare format
@@ -46,11 +46,11 @@ cp .env.example .env
 
 | Claude Code env var           | claude-proxy alias | ka.* alias | Model (qua cf-ai-proxy)          |
 |-------------------------------|--------------------|------------|----------------------------------|
-| `ANTHROPIC_DEFAULT_OPUS_MODEL`   | `swe.architect`    | `ka.zzz`   | `qwen3-30b-a3b-fp8`              |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `swe.engineer`     | `ka.xxx`   | `qwen-2.5-coder`                 |
-| `CLAUDE_CODE_SUBAGENT_MODEL`     | `swe.subagent`     | `swe.subagent` | `qwen-2.5-coder`             |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL`  | `swe.utility`      | `ka.ddd`/`ka.ccc` | `deepseek-r1` / `llama-3.1-8b-fp8` |
-| `ANTHROPIC_CUSTOM_MODEL_OPTION`  | `swe.knowledge`    | `ka.mmm`   | `qwen2.5-coder-7b-instruct`      |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL`   | `swe.architect`    | `ka.reason`   | `qwen3-30b-a3b-fp8`              |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `swe.engineer`     | `ka.base`     | `qwen-2.5-coder`                 |
+| `CLAUDE_CODE_SUBAGENT_MODEL`     | `swe.subagent`     | `ka.base`     | `qwen-2.5-coder`                 |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL`  | `swe.utility`      | `ka.simple`/`ka.docs` | `deepseek-r1` / `llama-3.1-8b-fp8` |
+| `ANTHROPIC_CUSTOM_MODEL_OPTION`  | `swe.knowledge`    | `ka.docs`     | `llama-3.1-8b-instruct-fp8-fast` |
 
 ## Cấu hình Claude Code
 

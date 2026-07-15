@@ -62,7 +62,7 @@ func TestRouterCacheMissAndHit(t *testing.T) {
 
 	prompt := "unique test prompt"
 	got := GetState().ModelRouter.Resolve("swe.utility", prompt)
-	expected := "nvidia/minimaxai/minimax-m3"
+	expected := "ka.docs"
 	if got != expected {
 		t.Fatalf("first resolve returned %q, want %q", got, expected)
 	}
@@ -110,8 +110,8 @@ func TestRouterDecisionMapping(t *testing.T) {
 		decisionCache = newTTLCache(time.Minute, time.Minute)
 		storeTestState(cfg, nil, map[string]string{}, nil)
 		got := GetState().ModelRouter.Resolve("swe.utility", "any prompt")
-		if got != "nvidia/stepfun-ai/step-3.7-flash" {
-			t.Fatalf("builtin fallback returned %q, want %q", got, "nvidia/stepfun-ai/step-3.7-flash")
+		if got != "ka.simple" {
+			t.Fatalf("builtin fallback returned %q, want %q", got, "ka.simple")
 		}
 	})
 }
@@ -128,8 +128,8 @@ func TestRouterOpenAIFormat(t *testing.T) {
 	decisionCache = newTTLCache(time.Minute, time.Minute)
 	storeTestState(cfg, nil, nil, nil)
 	got := GetState().ModelRouter.Resolve("swe.utility", "any prompt")
-	if got != "nvidia/minimaxai/minimax-m3" {
-		t.Fatalf("OpenAI format resolve returned %q, want %q", got, "nvidia/minimaxai/minimax-m3")
+	if got != "ka.docs" {
+		t.Fatalf("OpenAI format resolve returned %q, want %q", got, "ka.docs")
 	}
 }
 
@@ -145,8 +145,8 @@ func TestRouterOpenAIReasoningFormat(t *testing.T) {
 	decisionCache = newTTLCache(time.Minute, time.Minute)
 	storeTestState(cfg, nil, nil, nil)
 	got := GetState().ModelRouter.Resolve("swe.utility", "any prompt")
-	if got != "ds/deepseek-v4-flash" {
-		t.Fatalf("OpenAI reasoning format resolve returned %q, want %q", got, "ds/deepseek-v4-flash")
+	if got != "ka.simple" {
+		t.Fatalf("OpenAI reasoning format resolve returned %q, want %q", got, "ka.simple")
 	}
 }
 
@@ -299,7 +299,7 @@ func TestGetStaticTarget(t *testing.T) {
 		want  string
 	}{
 		{"swe.architect", "gpt-oss"},
-		{"swe.utility", "nvidia/stepfun-ai/step-3.7-flash"},
+		{"swe.utility", "ka.simple"},
 		{"unknown.model", "unknown.model"},
 	}
 

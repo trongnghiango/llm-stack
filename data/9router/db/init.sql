@@ -220,15 +220,16 @@ INSERT OR IGNORE INTO providerConnections (
 -- Format: ["cf-ai-proxy/{alias}"] → 9router route tới cf-ai-proxy provider
 --
 -- Mapping với claude-proxy/config.json:
---   swe.architect → ka.zzz  → qwen3-30b (model mạnh nhất)
---   swe.engineer  → ka.xxx  → qwen-2.5-coder (default coding model)
---   swe.subagent  → swe.subagent (pass-through)
---   swe.utility   → ka.ddd  → deepseek-r1 (fast utility)
---               or → ka.ccc  → llama-3.1-8b (doc/explain tasks)
---   swe.knowledge → ka.mmm  → qwen3-30b (knowledge tasks)
+--   swe.architect → ka.reason  → qwen3-30b (model mạnh nhất)
+--   swe.engineer  → ka.base    → qwen-2.5-coder (default coding model)
+--   swe.subagent  → ka.base    → qwen-2.5-coder (default coding model)
+--   swe.utility   → ka.simple  → deepseek-r1 (fast utility)
+--               or → ka.docs    → llama-3.1-8b (doc/explain tasks)
+--   swe.knowledge → ka.docs    → llama-3.1-8b (doc/explain tasks)
+--   ka.zzz        → (giữ lại test combo)
 -- ---------------------------------------------------------------------------
 
--- ka.zzz = Architect (Opus slot) → model mạnh: qwen3-30b-a3b-fp8
+-- ka.zzz = Test combo
 INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALUES (
   'combo-ka-zzz',
   'ka.zzz',
@@ -238,42 +239,42 @@ INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALU
   datetime('now')
 );
 
--- ka.xxx = Engineer (Sonnet slot) → coding model tốt nhất
+-- ka.reason = Architect (Opus slot) → model mạnh: qwen3-30b-a3b-fp8
 INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALUES (
-  'combo-ka-xxx',
-  'ka.xxx',
+  'combo-ka-reason',
+  'ka.reason',
+  NULL,
+  '["cf-ai-proxy/qwen3-30b-a3b-fp8"]',
+  datetime('now'),
+  datetime('now')
+);
+
+-- ka.base = Engineer / Subagent (Sonnet slot) → coding model tốt nhất
+INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALUES (
+  'combo-ka-base',
+  'ka.base',
   NULL,
   '["cf-ai-proxy/qwen-2.5-coder"]',
   datetime('now'),
   datetime('now')
 );
 
--- ka.ddd = Utility fallback → DeepSeek R1 (code / algorithm)
+-- ka.simple = Utility fallback (Haiku slot) → DeepSeek R1 (code / algorithm)
 INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALUES (
-  'combo-ka-ddd',
-  'ka.ddd',
+  'combo-ka-simple',
+  'ka.simple',
   NULL,
   '["cf-ai-proxy/deepseek-r1-distill-qwen-32b"]',
   datetime('now'),
   datetime('now')
 );
 
--- ka.ccc = Utility doc → llama-3.1-8b-instruct-fp8-fast (doc/explain nhanh)
+-- ka.docs = Utility doc / Knowledge (Haiku / Custom slot) → llama-3.1-8b-instruct-fp8-fast (doc/explain nhanh)
 INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALUES (
-  'combo-ka-ccc',
-  'ka.ccc',
+  'combo-ka-docs',
+  'ka.docs',
   NULL,
   '["cf-ai-proxy/llama-3.1-8b-instruct-fp8-fast"]',
-  datetime('now'),
-  datetime('now')
-);
-
--- ka.mmm = Knowledge → qwen2.5-coder-7b-instruct
-INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALUES (
-  'combo-ka-mmm',
-  'ka.mmm',
-  NULL,
-  '["cf-ai-proxy/qwen2.5-coder-7b-instruct"]',
   datetime('now'),
   datetime('now')
 );

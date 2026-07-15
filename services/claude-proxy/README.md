@@ -48,11 +48,11 @@ Resolution flow: static route → cache lookup → LLM classifier call or keywor
 
 | Role | Physical Model |
 |------|---------------|
-| `swe.architect` | `nvidia/openai/gpt-oss-120b` |
-| `swe.engineer` | `ds/deepseek-v4-flash` |
-| `swe.subagent` | `ag/gemini-3-flash-agent` |
-| `swe.utility` | Dynamic (doc keyword → MiniMax, else DeepSeek) |
-| `swe.knowledge` | `nvidia/minimaxai/minimax-m3` |
+| `swe.architect` | `ka.reason` |
+| `swe.engineer` | `ka.base` |
+| `swe.subagent` | `ka.base` |
+| `swe.utility` | Dynamic (doc keyword → ka.docs, else ka.simple) |
+| `swe.knowledge` | `ka.docs` |
 
 Client‑side mapping (`config/model_mappings.json`) maps conceptual model names to Claude API model IDs.
 

@@ -627,7 +627,7 @@ func TestProxyPayloadLogging(t *testing.T) {
 		t.Fatalf("logged payload is not valid JSON: %v", err)
 	}
 
-	if parsed.Model != "nvidia/stepfun-ai/step-3.7-flash" { // fallback model for swe.utility
+	if parsed.Model != "ka.simple" { // fallback model for swe.utility
 		t.Errorf("expected logged model to be rewritten fallback model, got: %q", parsed.Model)
 	}
 
