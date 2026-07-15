@@ -30,14 +30,24 @@ docker compose up -d --build
 
 # 3. Thực hiện Seeding nếu DB được tạo mới
 if [ "$DB_EXISTS" = "false" ]; then
-  echo "⏳ Chờ 9router khởi chạy và tạo cấu trúc DB (5 giây)..."
-  sleep 5
-  
+  echo "⏳ Chờ 9router khởi chạy và tạo cấu trúc DB (tối đa 15 giây)..."
+  for i in {1..15}; do
+    if [ -f "$DB_PATH" ]; then
+      break
+    fi
+    sleep 1
+  done
   if [ -f "$DB_PATH" ]; then
     echo "🤖 [Init] Đang nạp cấu hình Custom Providers và Combos từ init.sql..."
     if command -v sqlite3 >/dev/null 2>&1; then
       sqlite3 "$DB_PATH" < "$INIT_SQL"
       echo "✅ [Init] Nạp dữ liệu seed thành công!"
+      
+      # Tự động đồng bộ các NIM accounts
+      if [ -f "$PROJECT_ROOT/scripts/sync_nim_accounts.py" ]; then
+        echo "🤖 [Init] Đang đồng bộ các tài khoản NVIDIA NIM từ file CSV..."
+        python3 "$PROJECT_ROOT/scripts/sync_nim_accounts.py" || true
+      fi
       
       echo "🔄 Restarting 9router để cập nhật cấu hình..."
       docker compose restart 9router

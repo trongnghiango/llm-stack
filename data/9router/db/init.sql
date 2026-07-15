@@ -347,3 +347,21 @@ INSERT OR IGNORE INTO kv (scope, key, value) VALUES (
   'model',
   '{"providerAlias":"anthropic-compatible-cf-ai-proxy","id":"gemma-2-9b","type":"llm","name":"gemma-2-9b"}'
 );
+
+-- ---------------------------------------------------------------------------
+-- NVIDIA NIM Custom Model and Disabled Models Mappings
+-- ---------------------------------------------------------------------------
+
+-- Register nvidia/openai/gpt-oss-120b as a custom model for NVIDIA provider Node
+INSERT OR IGNORE INTO kv (scope, key, value) VALUES (
+  'customModels',
+  'nvidia|openai/gpt-oss-120b|llm',
+  '{"providerAlias":"nvidia","id":"openai/gpt-oss-120b","type":"llm","name":"openai/gpt-oss-120b"}'
+);
+
+-- Disable all built-in LLMs for nvidia to keep only gpt-oss-120b active by default
+INSERT OR IGNORE INTO kv (scope, key, value) VALUES (
+  'disabledModels',
+  'nvidia',
+  '["minimaxai/minimax-m2.7","minimaxai/minimax-m3","z-ai/glm-5.2","deepseek-ai/deepseek-v4-pro","deepseek-ai/deepseek-v4-flash","moonshotai/kimi-k2.6","nvidia/nemotron-3-ultra-550b-a55b"]'
+);
