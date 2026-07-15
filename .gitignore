@@ -5,13 +5,12 @@
 data/omniroute/storage.sqlite
 data/omniroute/storage.sqlite-shm
 data/omniroute/storage.sqlite-wal
-data/omniroute/logs/
-data/omniroute/call_logs/
 data/omniroute/auth/
 data/omniroute/jwt-secret
 data/omniroute/machine-id
 data/omniroute/bin/
 data/redis/
+data/logs/
 
 # Go build artifacts
 services/cf-ai-proxy/cf-ai-proxy

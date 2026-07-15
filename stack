@@ -15,18 +15,18 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 
 show_usage() {
-    echo -e "${BLUE}llm-stack CLI Manager${NC}"
+    echo -e "${BLUE}llm-stack Unified CLI Manager${NC}"
     echo "Sử dụng: ./stack [lệnh] [tùy chọn]"
     echo ""
     echo "Các lệnh hỗ trợ:"
     echo "  start             Khởi động toàn bộ dịch vụ (tự động seed DB nếu mới)"
     echo "  stop              Dừng và dọn dẹp các containers"
-    echo "  restart [service] Khởi động lại toàn bộ hoặc một dịch vụ cụ thể (ví dụ: 9router, cf-ai-proxy)"
+    echo "  restart [service] Khởi động lại toàn bộ hoặc một dịch vụ cụ thể (ví dụ: omniroute, cf-ai-proxy)"
     echo "  status            Xem trạng thái hoạt động của các containers"
     echo "  logs [service]    Xem logs trực tiếp (tail logs) của toàn bộ hoặc một dịch vụ cụ thể"
-    echo "  sync-nim          Đồng bộ tài khoản NVIDIA NIM từ CSV, tự động xóa cache Redis và restart 9router"
+    echo "  sync-nim          Đồng bộ tài khoản NVIDIA NIM từ CSV, tự động xóa cache Redis và restart omniroute"
     echo "  flush             Xóa sạch bộ nhớ đệm (cache) trong Redis"
-    echo "  update [service]  Cập nhật image mới nhất cho dịch vụ (mặc định: 9router)"
+    echo "  update [service]  Cập nhật image mới nhất cho dịch vụ (mặc định: omniroute)"
     echo "  help              Hiển thị hướng dẫn này"
     echo ""
     echo "Ví dụ:"
@@ -74,8 +74,8 @@ case "$1" in
             echo -e "${BLUE}🧹 Đang xóa sạch cache cũ trong Redis...${NC}"
             docker exec llm-redis redis-cli flushall >/dev/null || true
             
-            echo -e "${GREEN}🔄 Khởi động lại 9router để nạp cấu hình mới...${NC}"
-            docker compose restart 9router
+            echo -e "${GREEN}🔄 Khởi động lại omniroute để nạp cấu hình mới...${NC}"
+            docker compose restart omniroute
             
             echo -e "${GREEN}🎉 Hoàn tất! NVIDIA NIM đã được đồng bộ và sẵn sàng hoạt động.${NC}"
         else
@@ -89,13 +89,13 @@ case "$1" in
         echo -e "${GREEN}✅ Đã xóa sạch cache Redis!${NC}"
         ;;
     update)
-        SERVICE="${2:-9router}"
+        SERVICE="${2:-omniroute}"
         echo -e "${BLUE}📦 Bắt đầu cập nhật dịch vụ: ${SERVICE}...${NC}"
 
-        if [ "$SERVICE" = "9router" ]; then
-            BACKUP_FILE="9router-backup-$(date +%Y%m%d_%H%M%S).tar.gz"
-            echo -e "${YELLOW}💾 Đang sao lưu dữ liệu 9router thành ${BACKUP_FILE}...${NC}"
-            tar -czf "$BACKUP_FILE" -C "${PROJECT_ROOT}/data" 9router
+        if [ "$SERVICE" = "omniroute" ]; then
+            BACKUP_FILE="omniroute-backup-$(date +%Y%m%d_%H%M%S).tar.gz"
+            echo -e "${YELLOW}💾 Đang sao lưu dữ liệu omniroute thành ${BACKUP_FILE}...${NC}"
+            tar -czf "$BACKUP_FILE" -C "${PROJECT_ROOT}/data" omniroute
             echo -e "${GREEN}✅ Đã sao lưu dữ liệu!${NC}"
         fi
 

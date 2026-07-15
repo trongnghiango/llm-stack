@@ -41,7 +41,7 @@ qwen-2.5-coder,@cf/qwen/qwen2.5-coder-32b-instruct
 
 > [!WARNING]
 > **Quy định về Alias:**
-> - Các model `alias` tuyệt đối **KHÔNG chứa ký tự gạch chéo `/`** (Ví dụ: Dùng `qwen-2.5-coder` thay vì `qwen/2.5-coder`). Ký tự `/` sẽ làm hỏng logic định tuyến (routing path) của 9router.
+> - Các model `alias` tuyệt đối **KHÔNG chứa ký tự gạch chéo `/`** (Ví dụ: Dùng `qwen-2.5-coder` thay vì `qwen/2.5-coder`). Ký tự `/` sẽ làm hỏng logic định tuyến (routing path) của OmniRoute.
 
 ---
 
@@ -78,9 +78,9 @@ Khi bạn thêm/sửa tài khoản trong `accounts.csv` hoặc thêm model mới
   ```bash
   ./stack stop
   ```
-- Khởi động lại dịch vụ cụ thể (Ví dụ: `9router`):
+- Khởi động lại dịch vụ cụ thể (Ví dụ: `omniroute`):
   ```bash
-  ./stack restart 9router
+  ./stack restart omniroute
   ```
 - Xem trạng thái các containers:
   ```bash

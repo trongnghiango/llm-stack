@@ -219,8 +219,8 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
 
 	resp, err := utils.HTTPClient.Do(upstreamReq)
 	if err != nil {
-		logger.Errorf("[Lỗi kết nối] Không thể kết nối tới Local 9router (%s): %v\n", s.Config.UpstreamURL, err)
-		http.Error(w, "Unable to establish connection to Local 9router", http.StatusBadGateway)
+		logger.Errorf("[Lỗi kết nối] Không thể kết nối tới Local OmniRoute (%s): %v\n", s.Config.UpstreamURL, err)
+		http.Error(w, "Unable to establish connection to Local OmniRoute", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()

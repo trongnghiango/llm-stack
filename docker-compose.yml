@@ -4,7 +4,7 @@
 # Luồng:
 #   Claude Code (host:20129)
 #     → claude-proxy  (20129)  [model rewrite: swe.* → ka.*]
-#     → 9router       (20128)  [LLM router / load balancer]
+#     → omniroute     (20128)  [LLM router / load balancer]
 #     → cf-ai-proxy   (20127)  [Anthropic ↔ Cloudflare CF format]
 #     → Cloudflare Workers AI
 #         + Redis (session/quota storage)
@@ -65,19 +65,21 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # 9router – LLM Router / Load Balancer
+  # omniroute – LLM Router / Load Balancer
   # Nhận request từ claude-proxy, route tới cf-ai-proxy hoặc provider khác
-  # UI admin: http://localhost:20128  (đăng nhập bằng password trong init.sql)
+  # UI admin: http://localhost:20128  (đăng nhập bằng INITIAL_PASSWORD)
   # ---------------------------------------------------------------------------
-  9router:
-    image: decolua/9router:latest
-    container_name: llm-9router
+  omniroute:
+    image: diegosouzapw/omniroute:latest
+    container_name: llm-omniroute
     restart: unless-stopped
     ports:
-      - "20128:20128"          # Expose để truy cập UI admin từ host
+      - "${OMNIROUTE_PORT:-20128}:20128"          # Expose để truy cập UI admin từ host
     volumes:
       # Mount toàn bộ data dir (SQLite DB, logs, auth...)
-      - ./data/9router:/app/data
+      - ./data/omniroute:/app/data
+      - ./data/logs/omniroute:/app/data/logs
+      - ./data/logs/omniroute-calls:/app/data/call_logs
       - ./NIM_accounts.csv:/app/NIM_accounts.csv:ro
     environment:
       - TZ=${TZ:-Asia/Ho_Chi_Minh}
@@ -85,6 +87,9 @@ services:
       - HOSTNAME=0.0.0.0
       - DATA_DIR=/app/data
       - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET}
+      - API_KEY_SECRET=${API_KEY_SECRET}
+      - INITIAL_PASSWORD=${INITIAL_PASSWORD}
     depends_on:
       cf-ai-proxy:
         condition: service_started
@@ -96,7 +101,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # claude-proxy – Model name rewriter
-  # Intercept Claude Code → rewrite swe.* model names → ka.* → forward to 9router
+  # Intercept Claude Code → rewrite swe.* model names → ka.* → forward to omniroute
   # Chỉ bind localhost vì Claude Code chạy trên host
   # ---------------------------------------------------------------------------
   claude-proxy:
@@ -114,8 +119,9 @@ services:
     volumes:
       # Mount config để edit không cần rebuild
       - ./services/claude-proxy/config.json:/app/config.json:ro
+      - ./data/logs/claude-proxy:/app/logs
     depends_on:
-      - 9router
+      - omniroute
     networks:
       - llm-net
     healthcheck:

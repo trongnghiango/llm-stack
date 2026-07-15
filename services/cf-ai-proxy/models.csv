@@ -2,11 +2,11 @@
 # CLOUDFLARE POOL PROXY - DYNAMIC MODELS CONFIGURATION (models.csv)
 # ==============================================================================
 # QUY ƯỚC QUAN TRỌNG:
-# - Các alias tuyệt đối KHÔNG chứa ký tự gạch chéo `/` để tránh lỗi định tuyến 9router.
+# - Các alias tuyệt đối KHÔNG chứa ký tự gạch chéo `/` để tránh lỗi định tuyến OmniRoute.
 # ==============================================================================
 glm-4.7-flash,@cf/zai-org/glm-4.7-flash
 
-# --- Mappings Hiện Tại cho Claude Code / 9router (Không chứa /) ---
+# --- Mappings Hiện Tại cho Claude Code / OmniRoute (Không chứa /) ---
 deepseek-r1-distill-qwen-32b,@cf/deepseek-ai/deepseek-r1-distill-qwen-32b
 qwen2.5-coder-7b-instruct,@cf/qwen/qwen2.5-coder-32b-instruct
 llama-3.1-8b-instruct,@cf/meta/llama-3.1-8b-instruct

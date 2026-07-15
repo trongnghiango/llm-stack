@@ -8,7 +8,7 @@
     "ANTHROPIC_CUSTOM_MODEL_OPTION":  "swe.knowledge  → ka.docs"
   },
 
-  "upstream_url": "http://9router:20128",
+  "upstream_url": "http://omniroute:20128",
   "port": 20129,
   "upstream_api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 

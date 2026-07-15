@@ -17,14 +17,14 @@ def sync_nim():
     # Sử dụng duy nhất đường dẫn trong dự án hợp nhất llm-stack
     project_dir = "/home/ka/Repos/github.com/trongnghiango/llm-stack"
     csv_path = os.path.join(project_dir, "NIM_accounts.csv")
-    db_path = os.path.join(project_dir, "data/9router/db/data.sqlite")
+    db_path = os.path.join(project_dir, "data/omniroute/storage.sqlite")
 
     if not os.path.exists(csv_path):
         print(f"❌ Không tìm thấy file {csv_path}")
         return
 
     if not os.path.exists(db_path):
-        print(f"❌ Không tìm thấy file database SQLite của 9router tại {db_path}")
+        print(f"❌ Không tìm thấy file database SQLite của OmniRoute tại {db_path}")
         return
 
     # 1. Đọc danh sách NIM accounts từ CSV
@@ -58,16 +58,16 @@ def sync_nim():
 
     print(f"🔍 Tìm thấy {len(accounts)} tài khoản NVIDIA NIM từ CSV.")
 
-    # 2. Kết nối tới SQLite DB của 9router
+    # 2. Kết nối tới SQLite DB của OmniRoute
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("PRAGMA foreign_keys = ON;")
         
         # Dọn dẹp các connection loại 'nvidia' cũ
-        cursor.execute("DELETE FROM providerConnections WHERE provider='nvidia';")
+        cursor.execute("DELETE FROM provider_connections WHERE provider='nvidia';")
 
-        # 3. Inject các Connections loại 'nvidia' chuẩn của 9router
+        # 3. Inject các Connections loại 'nvidia' chuẩn của OmniRoute
         injected_count = 0
         for acc in accounts:
             conn_id = acc["id"]
@@ -75,26 +75,23 @@ def sync_nim():
             api_key = acc["token"]
             
             conn_data = {
-                "apiKey": api_key,
-                "testStatus": "active",
-                "providerSpecificData": {
-                    "connectionProxyEnabled": False,
-                    "connectionProxyUrl": "",
-                    "connectionNoProxy": ""
-                }
+                "connectionProxyEnabled": False,
+                "connectionProxyUrl": "",
+                "connectionNoProxy": ""
             }
 
             cursor.execute("""
-                INSERT OR REPLACE INTO providerConnections (
-                    id, provider, authType, name, priority, isActive, data, createdAt, updatedAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                INSERT OR REPLACE INTO provider_connections (
+                    id, provider, auth_type, name, priority, is_active, api_key, provider_specific_data, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
                 conn_id,
                 "nvidia",       # provider
-                "apikey",       # authType (Loại xác thực là apikey)
+                "apikey",       # auth_type (Loại xác thực là apikey)
                 conn_name,      # name (Tên connection ví dụ NIM_GOON_003)
                 1,              # priority
-                1,              # isActive = true
+                1,              # is_active = true
+                api_key,
                 json.dumps(conn_data),
                 datetime.now().isoformat() + "Z",
                 datetime.now().isoformat() + "Z"
@@ -104,7 +101,7 @@ def sync_nim():
 
         conn.commit()
         conn.close()
-        print(f"🎉 Đồng bộ thành công! Đã nạp {injected_count} connections NVIDIA NIM vào database của 9router.")
+        print(f"🎉 Đồng bộ thành công! Đã nạp {injected_count} connections NVIDIA NIM vào database của OmniRoute.")
 
     except sqlite3.Error as e:
         print(f"❌ Lỗi SQLite: {e}")

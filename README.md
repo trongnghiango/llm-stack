@@ -11,7 +11,7 @@ Claude Code  (ANTHROPIC_BASE_URL=http://127.0.0.1:20129)
 claude-proxy  :20129
      │  Rewrite model name: swe.* → ka.*
      ▼  model: "ka.base"
-9router  :20128  [UI: http://localhost:20128]
+omniroute  :20128  [UI: http://localhost:20128]
      │  Route ka.base → cf-ai-proxy/qwen-2.5-coder
      ▼  POST /v1/messages  (Anthropic format)
 cf-ai-proxy  :20127  [internal only]
@@ -74,19 +74,18 @@ Trong `~/.claude/settings.json`:
 | Service        | Port  | Mô tả                                      |
 |---------------|-------|--------------------------------------------|
 | `claude-proxy` | 20129 | Model rewriter, chỉ bind localhost         |
-| `9router`      | 20128 | LLM router + UI admin                      |
+| `omniroute`    | 20128 | LLM router + UI admin                      |
 | `cf-ai-proxy`  | 20127 | Cloudflare proxy (internal only)           |
 | `redis`        | —     | Session/quota storage (internal only)      |
 
-## 9router UI
-
+## OmniRoute UI
+ 
 Truy cập http://localhost:20128 để quản lý providers, models, và combos.
-
-**Mật khẩu mặc định**: `llmstack2026`  
-*(Hash được lưu trong `data/9router/db/init.sql` – đổi trước khi production)*
-
+ 
+**Mật khẩu mặc định**: `llmstack2026` (hoặc cấu hình qua `INITIAL_PASSWORD` trong `.env`)
+ 
 ### 🔄 Cách đồng bộ toàn bộ Available Models từ cf-ai-proxy:
-1. Đăng nhập vào UI 9router (http://localhost:20128).
+1. Đăng nhập vào UI OmniRoute (http://localhost:20128).
 2. Vào mục **Providers**, kéo xuống phần Custom Provider **`CF-AI-PROXY-MAIN`**.
 3. Tại phần **Available Models**, click vào nút **`Import from /models`** ở góc phải.
 4. Hệ thống sẽ tự động fetch danh sách từ `http://cf-ai-proxy:20127/v1/models` và nạp đầy đủ 9 model được khai báo trong `models.csv` vào giao diện của bạn.
@@ -107,11 +106,11 @@ Truy cập http://localhost:20128 để quản lý providers, models, và combos
 | `gemma-2-9b`                   | `@cf/google/gemma-2-9b-it`                   |
 
 ## Thêm model mới
-
+ 
 1. Thêm vào `services/cf-ai-proxy/models.csv`
-2. Thêm `INSERT INTO kv` vào `data/9router/db/init.sql`
-3. Xóa `data/9router/db/data.sqlite` để seed lại
-4. `docker compose restart 9router`
+2. Thêm `INSERT INTO kv` vào `data/omniroute/db/init.sql`
+3. Xóa `data/omniroute/storage.sqlite` để seed lại
+4. `./stack restart omniroute`
 
 ## Cấu trúc thư mục
 
@@ -126,12 +125,12 @@ llm-stack/
 │   ├── claude-proxy/     ← Source + Dockerfile
 │   └── cf-ai-proxy/      ← Source + Dockerfile
 ├── data/
-│   ├── 9router/
+│   ├── omniroute/
 │   │   └── db/
 │   │       └── init.sql  ← Seed schema + data
 │   └── redis/            ← Redis persistence
 └── scripts/
-    └── 9router-init.sh   ← Auto-init entrypoint
+    └── sync_nim_accounts.py ← Sync NIM connections script
 ```
 
 ## Lệnh quản lý hệ thống (`./stack`)
@@ -153,7 +152,7 @@ Dự án cung cấp CLI `./stack` thống nhất để quản trị stack.
 ./stack logs cf-ai-proxy
 
 # Khởi động lại service
-./stack restart 9router
+./stack restart omniroute
 
 # Xóa cache Redis
 ./stack flush
@@ -167,18 +166,18 @@ Dự án cung cấp CLI `./stack` thống nhất để quản trị stack.
 
 ## Cập nhật và Bảo đảm Dữ liệu (Update & Backup)
 
-Để nâng cấp dịch vụ lên phiên bản mới nhất (như `9router` hay `cf-ai-proxy`) mà không bị mất cấu hình và cơ sở dữ liệu SQLite:
+Để nâng cấp dịch vụ lên phiên bản mới nhất (như `omniroute` hay `cf-ai-proxy`) mà không bị mất cấu hình và cơ sở dữ liệu SQLite:
 
 ```bash
-# Cập nhật 9router (mặc định sẽ tự động sao lưu dữ liệu SQLite/Auth sang file nén .tar.gz trước khi pull bản mới)
+# Cập nhật omniroute (mặc định sẽ tự động sao lưu dữ liệu SQLite/Auth sang file nén .tar.gz trước khi pull bản mới)
 ./stack update
-
+ 
 # Cập nhật một dịch vụ cụ thể
 ./stack update cf-ai-proxy
 ```
-
+ 
 Quá trình `update` sẽ tự động:
-1. Tạo bản sao lưu dự phòng: `9router-backup-YYYYMMDD_HHMMSS.tar.gz` (nếu cập nhật `9router`).
+1. Tạo bản sao lưu dự phòng: `omniroute-backup-YYYYMMDD_HHMMSS.tar.gz` (nếu cập nhật `omniroute`).
 2. Kéo (pull) image docker mới nhất từ hub.
 3. Restart lại duy nhất container được chỉ định mà không tắt các thành phần khác.
 
