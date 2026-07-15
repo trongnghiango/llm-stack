@@ -92,6 +92,11 @@ func (j *JSONConfigLoader) Load() (Config, error) {
 		}
 	}
 
+	// Environment variable overrides for RedisURL
+	if val := os.Getenv("REDIS_URL"); val != "" {
+		cfg.RedisURL = val
+	}
+
 	if err := validateConfig(cfg); err != nil {
 		return Config{}, fmt.Errorf("validation failed: %w", err)
 	}

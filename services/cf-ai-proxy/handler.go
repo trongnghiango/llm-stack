@@ -553,8 +553,8 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 	toolIDs := make(map[int]string)
 	toolNames := make(map[int]string)
 
-	var streamBuffer strings.Builder
-	var flushedBuffer bool = false
+	var inToolCallBuf bool
+	var toolCallBuf strings.Builder
 
 	// Máy trạng thái cho streaming suy nghĩ (thinking) và text
 	var activeBlockType string // "thinking" or "text"
@@ -624,23 +624,38 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 		ended = true
 
 		// Xử lý nốt buffer nếu chưa được flush
-		if !flushedBuffer {
-			bufStr := streamBuffer.String()
-			if xmlToolCalls, textOutside, parsed := parseXMLToolCalls(bufStr); parsed {
+		if inToolCallBuf {
+			bufStr := toolCallBuf.String()
+			var parsed bool
+			var toolCalls []map[string]interface{}
+			var textOutside string
+
+			isXML := strings.Contains(bufStr, "<tools>") || strings.Contains(bufStr, "<tool_use>")
+			if isXML {
+				toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
+			} else {
+				toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
+			}
+
+			if parsed {
 				hasToolUse = true
 				if textOutside != "" {
 					sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
 				}
 
 				toolBlockIndexOffset := activeBlockIndex + 1
-				for xmlIdx, tc := range xmlToolCalls {
+				for xmlIdx, tc := range toolCalls {
 					funcMap, _ := tc["function"].(map[string]interface{})
 					name, _ := funcMap["name"].(string)
 					args := funcMap["arguments"]
 					id, _ := tc["id"].(string)
 
-					argsBytes, _ := json.Marshal(args)
-					argsStr := string(argsBytes)
+					var argsMap map[string]interface{}
+					if am, ok := args.(map[string]interface{}); ok {
+						argsMap = am
+					}
+					argsBytes, _ := json.Marshal(argsMap)
+					argsStrVal := string(argsBytes)
 
 					blkIdx := xmlIdx + toolBlockIndexOffset
 					toolBlockStart := map[string]interface{}{
@@ -660,54 +675,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 						"index": blkIdx,
 						"delta": map[string]interface{}{
 							"type":         "input_json_delta",
-							"partial_json": argsStr,
-						},
-					}
-					tbdBytes, _ := json.Marshal(toolBlockDelta)
-					fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
-
-					toolBlockStop := map[string]interface{}{
-						"type":  "content_block_stop",
-						"index": blkIdx,
-					}
-					tbstBytes, _ := json.Marshal(toolBlockStop)
-					fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
-				}
-			} else if jsonToolCalls, textOutside, parsed := parseRawJSONToolCall(bufStr); parsed {
-				hasToolUse = true
-				if textOutside != "" {
-					sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
-				}
-
-				toolBlockIndexOffset := activeBlockIndex + 1
-				for jsonIdx, tc := range jsonToolCalls {
-					funcMap, _ := tc["function"].(map[string]interface{})
-					name, _ := funcMap["name"].(string)
-					args := funcMap["arguments"]
-					id, _ := tc["id"].(string)
-
-					argsBytes, _ := json.Marshal(args)
-					argsStr := string(argsBytes)
-
-					blkIdx := jsonIdx + toolBlockIndexOffset
-					toolBlockStart := map[string]interface{}{
-						"type":  "content_block_start",
-						"index": blkIdx,
-						"content_block": map[string]interface{}{
-							"type": "tool_use",
-							"id":   id,
-							"name": name,
-						},
-					}
-					tbsBytes, _ := json.Marshal(toolBlockStart)
-					fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
-
-					toolBlockDelta := map[string]interface{}{
-						"type":  "content_block_delta",
-						"index": blkIdx,
-						"delta": map[string]interface{}{
-							"type":         "input_json_delta",
-							"partial_json": argsStr,
+							"partial_json": argsStrVal,
 						},
 					}
 					tbdBytes, _ := json.Marshal(toolBlockDelta)
@@ -732,7 +700,8 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 					sendDeltaBlock(w, "text", activeBlockIndex, bufStr)
 				}
 			}
-			flushedBuffer = true
+			inToolCallBuf = false
+			toolCallBuf.Reset()
 		}
 
 		if activeBlockType == "" {
@@ -990,99 +959,199 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 						thinkingEnded = true
 					}
 
-					if !flushedBuffer {
-						streamBuffer.WriteString(token)
-						bufStr := streamBuffer.String()
-						trimmedBuf := strings.TrimSpace(bufStr)
-
-						if trimmedBuf != "" {
-							if isPotentialToolCall(trimmedBuf) {
-								isXML := strings.HasPrefix(trimmedBuf, "<")
-								isJSON := strings.HasPrefix(trimmedBuf, "{")
-								hasEnded := false
-								if isXML {
-									hasEnded = strings.Contains(trimmedBuf, "</tools>") || strings.Contains(trimmedBuf, "</tool_use>")
-								} else if isJSON {
-									hasEnded = strings.HasSuffix(trimmedBuf, "}")
-								}
-
-								if hasEnded {
-									var parsed bool
-									var toolCalls []map[string]interface{}
-									var textOutside string
-
-									if isXML {
-										toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
-									} else {
-										toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
-									}
-
-									if parsed {
-										hasToolUse = true
-										flushedBuffer = true
-
-										if textOutside != "" {
-											sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
-										}
-
-										toolBlockIndexOffset := activeBlockIndex + 1
-										for xmlIdx, tc := range toolCalls {
-											funcMap, _ := tc["function"].(map[string]interface{})
-											name, _ := funcMap["name"].(string)
-											args := funcMap["arguments"]
-											id, _ := tc["id"].(string)
-
-											var argsMap map[string]interface{}
-											if am, ok := args.(map[string]interface{}); ok {
-												argsMap = am
-											}
-											argsBytes, _ := json.Marshal(argsMap)
-											argsStr := string(argsBytes)
-
-											blkIdx := xmlIdx + toolBlockIndexOffset
-
-											toolBlockStart := map[string]interface{}{
-												"type":  "content_block_start",
-												"index": blkIdx,
-												"content_block": map[string]interface{}{
-													"type": "tool_use",
-													"id":   id,
-													"name": name,
-												},
-											}
-											tbsBytes, _ := json.Marshal(toolBlockStart)
-											fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
-
-											toolBlockDelta := map[string]interface{}{
-												"type":  "content_block_delta",
-												"index": blkIdx,
-												"delta": map[string]interface{}{
-													"type":         "input_json_delta",
-													"partial_json": argsStr,
-												},
-											}
-											tbdBytes, _ := json.Marshal(toolBlockDelta)
-											fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
-
-											toolBlockStop := map[string]interface{}{
-												"type":  "content_block_stop",
-												"index": blkIdx,
-											}
-											tbstBytes, _ := json.Marshal(toolBlockStop)
-											fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
-										}
-									}
-								}
+					if inToolCallBuf {
+						toolCallBuf.WriteString(token)
+						bufStr := toolCallBuf.String()
+						
+						// Check if the tool call has ended
+						hasEnded := false
+						isXML := strings.Contains(bufStr, "<tools>") || strings.Contains(bufStr, "<tool_use>")
+						if isXML {
+							hasEnded = strings.Contains(bufStr, "</tools>") || strings.Contains(bufStr, "</tool_use>")
+						} else {
+							hasEnded = strings.HasSuffix(strings.TrimSpace(bufStr), "}")
+						}
+						
+						if hasEnded {
+							var parsed bool
+							var toolCalls []map[string]interface{}
+							var textOutside string
+							
+							if isXML {
+								toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
 							} else {
-								// Không phải định dạng gọi tool, xả sạch buffer
-								sendDeltaBlock(w, "text", activeBlockIndex, bufStr)
-								flushedBuffer = true
-								streamBuffer.Reset()
+								toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
+							}
+							
+							if parsed {
+								hasToolUse = true
+								inToolCallBuf = false
+								toolCallBuf.Reset()
+								
+								if textOutside != "" {
+									sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
+								}
+								
+								toolBlockIndexOffset := activeBlockIndex + 1
+								for xmlIdx, tc := range toolCalls {
+									funcMap, _ := tc["function"].(map[string]interface{})
+									name, _ := funcMap["name"].(string)
+									args := funcMap["arguments"]
+									id, _ := tc["id"].(string)
+									
+									var argsMap map[string]interface{}
+									if am, ok := args.(map[string]interface{}); ok {
+										argsMap = am
+									}
+									argsBytes, _ := json.Marshal(argsMap)
+									argsStr := string(argsBytes)
+									
+									blkIdx := xmlIdx + toolBlockIndexOffset
+									
+									toolBlockStart := map[string]interface{}{
+										"type":  "content_block_start",
+										"index": blkIdx,
+										"content_block": map[string]interface{}{
+											"type": "tool_use",
+											"id":   id,
+											"name": name,
+										},
+									}
+									tbsBytes, _ := json.Marshal(toolBlockStart)
+									fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
+									
+									toolBlockDelta := map[string]interface{}{
+										"type":  "content_block_delta",
+										"index": blkIdx,
+										"delta": map[string]interface{}{
+											"type":         "input_json_delta",
+											"partial_json": argsStr,
+										},
+									}
+									tbdBytes, _ := json.Marshal(toolBlockDelta)
+									fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
+									
+									toolBlockStop := map[string]interface{}{
+										"type":  "content_block_stop",
+										"index": blkIdx,
+									}
+									tbstBytes, _ := json.Marshal(toolBlockStop)
+									fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
+								}
 							}
 						}
 					} else {
-						// Nếu đã xả xong, phát thẳng token
-						sendDeltaBlock(w, "text", activeBlockIndex, token)
+						// Check if the token contains the start of a tool call
+						startIdx := -1
+						isXML := false
+						
+						if idx := strings.Index(token, "<tools>"); idx != -1 {
+							startIdx = idx
+							isXML = true
+						} else if idx := strings.Index(token, "<tool_use>"); idx != -1 {
+							startIdx = idx
+							isXML = true
+						} else if idx := strings.Index(token, "{\"name\":"); idx != -1 {
+							startIdx = idx
+							isXML = false
+						} else if idx := strings.Index(token, "{\"name\""); idx != -1 {
+							startIdx = idx
+							isXML = false
+						}
+						
+						if startIdx != -1 {
+							// Stream the text before the tool call
+							textBefore := token[:startIdx]
+							if textBefore != "" {
+								sendDeltaBlock(w, "text", activeBlockIndex, textBefore)
+							}
+							
+							// Start buffering
+							inToolCallBuf = true
+							toolCallBuf.Reset()
+							toolCallBuf.WriteString(token[startIdx:])
+							
+							// Check if it also has ended in this same token
+							bufStr := toolCallBuf.String()
+							hasEnded := false
+							if isXML {
+								hasEnded = strings.Contains(bufStr, "</tools>") || strings.Contains(bufStr, "</tool_use>")
+							} else {
+								hasEnded = strings.HasSuffix(strings.TrimSpace(bufStr), "}")
+							}
+							
+							if hasEnded {
+								var parsed bool
+								var toolCalls []map[string]interface{}
+								var textOutside string
+								
+								if isXML {
+									toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
+								} else {
+									toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
+								}
+								
+								if parsed {
+									hasToolUse = true
+									inToolCallBuf = false
+									toolCallBuf.Reset()
+									
+									if textOutside != "" {
+										sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
+									}
+									
+									toolBlockIndexOffset := activeBlockIndex + 1
+									for xmlIdx, tc := range toolCalls {
+										funcMap, _ := tc["function"].(map[string]interface{})
+										name, _ := funcMap["name"].(string)
+										args := funcMap["arguments"]
+										id, _ := tc["id"].(string)
+										
+										var argsMap map[string]interface{}
+										if am, ok := args.(map[string]interface{}); ok {
+											argsMap = am
+										}
+										argsBytes, _ := json.Marshal(argsMap)
+										argsStr := string(argsBytes)
+										
+										blkIdx := xmlIdx + toolBlockIndexOffset
+										
+										toolBlockStart := map[string]interface{}{
+											"type":  "content_block_start",
+											"index": blkIdx,
+											"content_block": map[string]interface{}{
+												"type": "tool_use",
+												"id":   id,
+												"name": name,
+											},
+										}
+										tbsBytes, _ := json.Marshal(toolBlockStart)
+										fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
+										
+										toolBlockDelta := map[string]interface{}{
+											"type":  "content_block_delta",
+											"index": blkIdx,
+											"delta": map[string]interface{}{
+												"type":         "input_json_delta",
+												"partial_json": argsStr,
+											},
+										}
+										tbdBytes, _ := json.Marshal(toolBlockDelta)
+										fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
+										
+										toolBlockStop := map[string]interface{}{
+											"type":  "content_block_stop",
+											"index": blkIdx,
+										}
+										tbstBytes, _ := json.Marshal(toolBlockStop)
+										fmt.Fprintf(w, "event: content_block_stop\ndata: %s\n\n", string(tbstBytes))
+									}
+								}
+							}
+						} else {
+							// No tool call start, send token directly
+							sendDeltaBlock(w, "text", activeBlockIndex, token)
+						}
 					}
 				}
 			}

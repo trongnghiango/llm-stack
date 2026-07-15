@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"crypto/tls"
 	"net/http"
 	"os"
 	"strconv"
@@ -40,5 +41,8 @@ var HTTPClient = &http.Client{
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		DisableCompression:    true,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false,
+		},
 	},
 }
