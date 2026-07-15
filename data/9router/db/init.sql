@@ -244,7 +244,7 @@ INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALU
   'combo-ka-reason',
   'ka.reason',
   NULL,
-  '["nvidia/openai/gpt-oss-120b"]',
+  '["ag/claude-opus-4-6-thinking","nvidia/openai/gpt-oss-120b"]',
   datetime('now'),
   datetime('now')
 );
@@ -254,7 +254,7 @@ INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALU
   'combo-ka-base',
   'ka.base',
   NULL,
-  '["cf-ai-proxy/qwen-2.5-coder"]',
+  '["ag/gemini-3.5-flash-low","cf-ai-proxy/qwen-2.5-coder"]',
   datetime('now'),
   datetime('now')
 );
@@ -264,7 +264,7 @@ INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALU
   'combo-ka-simple',
   'ka.simple',
   NULL,
-  '["cf-ai-proxy/deepseek-r1-distill-qwen-32b"]',
+  '["cf-ai-proxy/glm-4.7-flash"]',
   datetime('now'),
   datetime('now')
 );
