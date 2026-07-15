@@ -6,6 +6,8 @@ import json
 import uuid
 from datetime import datetime
 
+import glob
+
 def is_valid_uuid(val):
     try:
         uuid.UUID(str(val))
@@ -16,44 +18,46 @@ def is_valid_uuid(val):
 def sync_nim():
     # Sử dụng duy nhất đường dẫn trong dự án hợp nhất llm-stack
     project_dir = "/home/ka/Repos/github.com/trongnghiango/llm-stack"
-    csv_path = os.path.join(project_dir, "NIM_accounts.csv")
+    csv_pattern = os.path.join(project_dir, "NIM_*.csv")
     db_path = os.path.join(project_dir, "data/9router/db/data.sqlite")
-
-    if not os.path.exists(csv_path):
-        print(f"❌ Không tìm thấy file {csv_path}")
-        return
 
     if not os.path.exists(db_path):
         print(f"❌ Không tìm thấy file database SQLite của 9router tại {db_path}")
         return
 
-    # 1. Đọc danh sách NIM accounts từ CSV
-    accounts = []
-    try:
-        with open(csv_path, mode="r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            reader.fieldnames = [name.strip() for name in reader.fieldnames]
-            
-            for row in reader:
-                if row.get("name") and row.get("token"):
-                    csv_id = row.get("ID", "").strip()
-                    conn_id = csv_id
-                    # Tự sinh UUID nếu ID rỗng hoặc không đúng định dạng
-                    if not csv_id or not is_valid_uuid(csv_id):
-                        conn_id = str(uuid.uuid4())
-
-                    accounts.append({
-                        "id": conn_id,
-                        "name": row["name"].strip(),
-                        "token": row["token"].strip(),
-                        "expiration": row.get("expiration", "").strip()
-                    })
-    except Exception as e:
-        print(f"❌ Lỗi khi đọc file CSV: {e}")
+    csv_files = glob.glob(csv_pattern)
+    if not csv_files:
+        print(f"❌ Không tìm thấy bất kỳ file NIM_*.csv nào tại {project_dir}")
         return
 
+    # 1. Đọc danh sách NIM accounts từ tất cả các file CSV khớp mẫu
+    accounts = []
+    for csv_path in csv_files:
+        print(f"📖 Đang đọc file: {os.path.basename(csv_path)}")
+        try:
+            with open(csv_path, mode="r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                reader.fieldnames = [name.strip() for name in reader.fieldnames]
+                
+                for row in reader:
+                    if row.get("name") and row.get("token"):
+                        csv_id = row.get("ID", "").strip()
+                        conn_id = csv_id
+                        # Tự sinh UUID nếu ID rỗng hoặc không đúng định dạng
+                        if not csv_id or not is_valid_uuid(csv_id):
+                            conn_id = str(uuid.uuid4())
+
+                        accounts.append({
+                            "id": conn_id,
+                            "name": row["name"].strip(),
+                            "token": row["token"].strip(),
+                            "expiration": row.get("expiration", "").strip()
+                        })
+        except Exception as e:
+            print(f"❌ Lỗi khi đọc file CSV {csv_path}: {e}")
+            continue
     if not accounts:
-        print("⚠️ File NIM_accounts.csv không chứa tài khoản hợp lệ nào!")
+        print("⚠️ Không tìm thấy tài khoản NVIDIA NIM hợp lệ nào trong các file CSV!")
         return
 
     print(f"🔍 Tìm thấy {len(accounts)} tài khoản NVIDIA NIM từ CSV.")
