@@ -239,12 +239,12 @@ INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALU
   datetime('now')
 );
 
--- ka.reason = Architect (Opus slot) → model mạnh: qwen3-30b-a3b-fp8
+-- ka.reason = Architect (Opus slot) → model mạnh: nvidia/openai/gpt-oss-120b
 INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALUES (
   'combo-ka-reason',
   'ka.reason',
   NULL,
-  '["cf-ai-proxy/qwen3-30b-a3b-fp8"]',
+  '["nvidia/openai/gpt-oss-120b"]',
   datetime('now'),
   datetime('now')
 );
@@ -269,12 +269,12 @@ INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALU
   datetime('now')
 );
 
--- ka.docs = Utility doc / Knowledge (Haiku / Custom slot) → llama-3.1-8b-instruct-fp8-fast (doc/explain nhanh)
+-- ka.docs = Utility doc / Knowledge (Haiku / Custom slot) → nvidia/minimaxai/minimax-m3
 INSERT OR IGNORE INTO combos (id, name, kind, models, createdAt, updatedAt) VALUES (
   'combo-ka-docs',
   'ka.docs',
   NULL,
-  '["cf-ai-proxy/llama-3.1-8b-instruct-fp8-fast"]',
+  '["nvidia/minimaxai/minimax-m3"]',
   datetime('now'),
   datetime('now')
 );
