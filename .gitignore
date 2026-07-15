@@ -2,14 +2,15 @@
 .env
 
 # Runtime data (SQLite, logs, redis)
-data/9router/db/data.sqlite
-data/9router/db/data.sqlite-shm
-data/9router/db/data.sqlite-wal
-data/9router/logs/
-data/9router/auth/
-data/9router/jwt-secret
-data/9router/machine-id
-data/9router/bin/
+data/omniroute/storage.sqlite
+data/omniroute/storage.sqlite-shm
+data/omniroute/storage.sqlite-wal
+data/omniroute/logs/
+data/omniroute/call_logs/
+data/omniroute/auth/
+data/omniroute/jwt-secret
+data/omniroute/machine-id
+data/omniroute/bin/
 data/redis/
 
 # Go build artifacts
@@ -29,4 +30,6 @@ logs/
 .DS_Store
 Thumbs.db
 NIM_accounts.csv
-data/9router/db/backups/
+data/omniroute/db/backups/
+data/omniroute/db_backups/
+data/omniroute/server.env
