@@ -1,16 +1,9 @@
 # Secrets
 .env
 
-# Runtime data (SQLite, logs, redis)
-data/omniroute/storage.sqlite
-data/omniroute/storage.sqlite-shm
-data/omniroute/storage.sqlite-wal
-data/omniroute/auth/
-data/omniroute/jwt-secret
-data/omniroute/machine-id
-data/omniroute/bin/
-data/redis/
-data/logs/
+# Runtime data (SQLite, logs, redis, backups)
+data/
+*.tar.gz
 
 # Go build artifacts
 services/cf-ai-proxy/cf-ai-proxy
@@ -28,7 +21,7 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Other
 NIM_accounts.csv
-data/omniroute/db/backups/
-data/omniroute/db_backups/
-data/omniroute/server.env
+services/omniroute/

@@ -70,7 +70,10 @@ services:
   # UI admin: http://localhost:20128  (đăng nhập bằng INITIAL_PASSWORD)
   # ---------------------------------------------------------------------------
   omniroute:
-    image: diegosouzapw/omniroute:latest
+    build:
+      context: ./services/omniroute
+      dockerfile: Dockerfile
+    image: llm-omniroute:3.8.49
     container_name: llm-omniroute
     restart: unless-stopped
     ports:
@@ -87,6 +90,7 @@ services:
       - HOSTNAME=0.0.0.0
       - DATA_DIR=/app/data
       - NODE_ENV=production
+      - RATE_LIMIT_AUTO_ENABLE=false
       - JWT_SECRET=${JWT_SECRET}
       - API_KEY_SECRET=${API_KEY_SECRET}
       - INITIAL_PASSWORD=${INITIAL_PASSWORD}
