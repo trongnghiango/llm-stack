@@ -79,6 +79,11 @@ func Errorf(format string, a ...interface{}) {
 	logger.Errorf(format, a...)
 }
 
+// Warnf writes warning log message if info logging is enabled.
+func Warnf(format string, a ...interface{}) {
+	logger.Warnf(format, a...)
+}
+
 // Debugf writes log message if debug logging is enabled.
 func Debugf(format string, a ...interface{}) {
 	logger.Debugf(format, a...)
@@ -99,6 +104,13 @@ func (sl *structuredLogger) Infof(format string, a ...interface{}) {
 		return
 	}
 	sl.write("INFO", format, a...)
+}
+
+func (sl *structuredLogger) Warnf(format string, a ...interface{}) {
+	if !logInfoEnabled {
+		return
+	}
+	sl.write("WARN", format, a...)
 }
 
 func (sl *structuredLogger) Errorf(format string, a ...interface{}) {
@@ -211,6 +223,9 @@ func formatJSONLine(p []byte) []byte {
 		rest := strings.TrimSpace(raw[19:])
 		if strings.HasPrefix(rest, "[INFO]") {
 			level = "INFO"
+			msg = strings.TrimSpace(rest[6:])
+		} else if strings.HasPrefix(rest, "[WARN]") {
+			level = "WARN"
 			msg = strings.TrimSpace(rest[6:])
 		} else if strings.HasPrefix(rest, "[ERROR]") {
 			level = "ERROR"

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,11 +170,29 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	forwardRequest(w, r, modifiedBody)
 }
 
+// Headers to drop before forwarding
+var droppedHeaders = map[string]bool{
+	"content-length":    true,
+	"content-encoding":  true,
+	"transfer-encoding": true,
+}
+
+func copySafeHeaders(dst, src http.Header) {
+	for name, values := range src {
+		if droppedHeaders[strings.ToLower(name)] {
+			continue
+		}
+		for _, v := range values {
+			dst.Add(name, v)
+		}
+	}
+}
+
 func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
 	s := router.GetState()
 	upstreamURL, err := url.Parse(s.Config.UpstreamURL)
 	if err != nil {
-		logger.Errorf("[Lỗi Upstream] Đường dẫn upstream không hợp lệ: %v\n", err)
+		logger.Errorf("[Lỗi Upstream] Đường dẫn upstream không hợp lệ: %v", err)
 		http.Error(w, "Invalid Upstream Endpoint Configuration", http.StatusBadGateway)
 		return
 	}
@@ -185,16 +204,7 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
 		return
 	}
 
-	// Copy original headers, drop length/encoding ones
-	for name, values := range r.Header {
-		low := strings.ToLower(name)
-		if low == "content-length" || low == "content-encoding" || low == "transfer-encoding" {
-			continue
-		}
-		for _, v := range values {
-			upstreamReq.Header.Add(name, v)
-		}
-	}
+	copySafeHeaders(upstreamReq.Header, r.Header)
 
 	// Set correct Content-Length for modified payload
 	upstreamReq.ContentLength = int64(len(payload))
@@ -212,6 +222,7 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
 
 	upstreamReq.Header.Set("Anthropic-Version", "2023-06-01")
 	upstreamReq.Header.Set("Content-Type", "application/json")
+	
 	// Forward trace ID to upstream for end-to-end correlation.
 	if reqID := r.Header.Get("X-Request-ID"); reqID != "" {
 		upstreamReq.Header.Set("X-Request-ID", reqID)
@@ -219,7 +230,7 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
 
 	resp, err := utils.HTTPClient.Do(upstreamReq)
 	if err != nil {
-		logger.Errorf("[Lỗi kết nối] Không thể kết nối tới Local 9router (%s): %v\n", s.Config.UpstreamURL, err)
+		logger.Errorf("[Lỗi kết nối] Không thể kết nối tới Local 9router (%s): %v", s.Config.UpstreamURL, err)
 		http.Error(w, "Unable to establish connection to Local 9router", http.StatusBadGateway)
 		return
 	}
@@ -249,34 +260,108 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(resp.StatusCode)
+		forwardStreamWithValidation(w, resp)
+		return
 	}
 
 	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+func forwardStreamWithValidation(w http.ResponseWriter, resp *http.Response) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		_, _ = io.Copy(w, resp.Body)
 		return
 	}
-	buf := make([]byte, 4096)
-	for {
-		n, readErr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return
-			}
-			flusher.Flush()
+	
+	// Setup line-by-line reading for SSE validation.
+	// SSE events are separated by double newline \n\n
+	scanner := bufio.NewScanner(resp.Body)
+	
+	// Using custom split function for SSE
+	splitSSE := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
 		}
-		if readErr != nil {
-			if readErr != io.EOF {
-				logger.Errorf("[Lỗi đọc luồng] Kết thúc luồng đọc bất thường từ Upstream: %v\n", readErr)
+		
+		if i := bytes.Index(data, []byte("\n\n")); i >= 0 {
+			// We have a full SSE event
+			return i + 2, data[0:i], nil
+		}
+		
+		if atEOF {
+			return len(data), data, nil
+		}
+		
+		// Request more data
+		return 0, nil, nil
+	}
+	
+	// Up to 1MB per SSE event payload capacity
+	buf := make([]byte, 8192)
+	scanner.Buffer(buf, 1024*1024)
+	scanner.Split(splitSSE)
+
+	strictMode := os.Getenv("STRICT_SCHEMA_VALIDATION") == "true"
+
+	for scanner.Scan() {
+		eventData := scanner.Bytes()
+		
+		// Write original data back plus double newline
+		payloadToWrite := eventData
+		
+		var shouldForward = true
+
+		// Find data: row
+		if dIdx := bytes.Index(eventData, []byte("data: ")); dIdx >= 0 {
+			jsonPayload := eventData[dIdx+6:]
+			// Just simple cleanup before JSON validation
+			jsonPayload = bytes.TrimSpace(jsonPayload) 
+			
+			if len(jsonPayload) > 0 && string(jsonPayload) != "[DONE]" {
+				if !json.Valid(jsonPayload) {
+					metrics.SseValidationErrorsTotal.Inc()
+					chunkTruncated := string(jsonPayload)
+					if len(chunkTruncated) > 150 {
+						chunkTruncated = chunkTruncated[:150] + "..."
+					}
+					
+					if strictMode {
+						logger.Errorf("[Stream Parse Error] STRICT MODE: JSON hỏng. Ngắt kết nối. Chunk: %s", chunkTruncated)
+						shouldForward = false
+						// Trả về error dạng SSE 
+						errEvent := "event: error\ndata: {\"error\": {\"type\": \"stream_parse_error\", \"message\": \"Strict mode terminated connection due to invalid schema structure from Upstream.\"}}\n\n"
+						w.Write([]byte(errEvent))
+						flusher.Flush()
+						return // Terminate loop & conn
+					} else {
+						logger.Warnf("[Stream Parse] Bỏ qua JSON hỏng. Chunk: %s", chunkTruncated)
+						shouldForward = false
+						warnEvent := "event: ping\ndata: {\"warning\": \"malformed_json_skipped_gracefully\"}\n\n"
+						w.Write([]byte(warnEvent))
+					}
+				}
 			}
-			break
+		}
+
+		if shouldForward {
+			w.Write(payloadToWrite)
+			w.Write([]byte("\n\n"))
+		}
+		flusher.Flush()
+	}
+	
+	if err := scanner.Err(); err != nil {
+		if err != io.EOF && !errors.Is(err, context.Canceled) {
+			logger.Errorf("[Lỗi đọc luồng] Kết thúc luồng đọc bất thường từ Upstream (Scanner): %v", err)
 		}
 	}
 }
 
 func main() {
-	// Initialise logger – will be closed on exit.
+	// Initialise logger - will be closed on exit.
 	defer logger.CloseLogger()
 
 	// Parse CLI flags (before config load so --config can override path).

@@ -70,6 +70,10 @@ var (
 		Name: "router_circuit_breaker_state",
 		Help: "LLM circuit breaker state: 0=closed, 1=open, 2=half-open",
 	})
+	SseValidationErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "router_sse_validation_errors_total",
+		Help: "Total number of SSE events dropped or disconnected due to malformed JSON schemas",
+	})
 )
 
 func init() {
@@ -88,6 +92,7 @@ func init() {
 		CircuitBreakerState,
 		HeuristicMatchesTotal,
 		HeuristicMissesTotal,
+		SseValidationErrorsTotal,
 	)
 }
 

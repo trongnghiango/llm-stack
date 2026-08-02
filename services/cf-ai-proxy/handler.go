@@ -68,22 +68,24 @@ func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
 		resp, err = h.forwardToCloudflare(account, req.Model, req)
 
 		if err != nil || resp == nil {
-			h.sm.Penalize(c.Request.Context(), account.AccountID, 5*time.Minute)
-			h.sm.BreakSession(c.Request.Context(), sessionID)
+			log.Printf("[⚠️ CF Error/5xx] Lỗi tạm thời từ Cloudflare. BreakSession, KHÔNG phạt account.")
+			// KHÔNG phạt 5 phút để tránh chain-reaction khóa toàn bộ hệ thống
+			h.sm.BreakSession(context.Background(), sessionID)
 			continue
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusUnauthorized {
 			resp.Body.Close()
-			h.sm.Penalize(c.Request.Context(), account.AccountID, 12*time.Hour) // Phạt 24 tiếng nếu cạn kiệt Neurons ngày
-			h.sm.BreakSession(c.Request.Context(), sessionID)
+			h.sm.Penalize(context.Background(), account.AccountID, 12*time.Hour) // Phạt 24 tiếng nếu cạn kiệt Neurons ngày
+			h.sm.BreakSession(context.Background(), sessionID)
 			continue
 		}
 
 		if resp.StatusCode >= 500 {
 			resp.Body.Close()
-			h.sm.Penalize(c.Request.Context(), account.AccountID, 5*time.Minute)
-			h.sm.BreakSession(c.Request.Context(), sessionID)
+			log.Printf("[⚠️ CF Error/5xx] Lỗi tạm thời từ Cloudflare. BreakSession, KHÔNG phạt account.")
+			// KHÔNG phạt 5 phút để tránh chain-reaction khóa toàn bộ hệ thống
+			h.sm.BreakSession(context.Background(), sessionID)
 			continue
 		}
 		break
@@ -300,22 +302,24 @@ func (h *ProxyHandler) HandleAnthropicCompletion(c *gin.Context) {
 		resp, err = h.forwardToCloudflare(account, req.Model, openAIReq)
 
 		if err != nil || resp == nil {
-			h.sm.Penalize(c.Request.Context(), account.AccountID, 5*time.Minute)
-			h.sm.BreakSession(c.Request.Context(), sessionID)
+			log.Printf("[⚠️ CF Error/5xx] Lỗi tạm thời từ Cloudflare. BreakSession, KHÔNG phạt account.")
+			// KHÔNG phạt 5 phút để tránh chain-reaction khóa toàn bộ hệ thống
+			h.sm.BreakSession(context.Background(), sessionID)
 			continue
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusUnauthorized {
 			resp.Body.Close()
-			h.sm.Penalize(c.Request.Context(), account.AccountID, 12*time.Hour)
-			h.sm.BreakSession(c.Request.Context(), sessionID)
+			h.sm.Penalize(context.Background(), account.AccountID, 12*time.Hour)
+			h.sm.BreakSession(context.Background(), sessionID)
 			continue
 		}
 
 		if resp.StatusCode >= 500 {
 			resp.Body.Close()
-			h.sm.Penalize(c.Request.Context(), account.AccountID, 5*time.Minute)
-			h.sm.BreakSession(c.Request.Context(), sessionID)
+			log.Printf("[⚠️ CF Error/5xx] Lỗi tạm thời từ Cloudflare. BreakSession, KHÔNG phạt account.")
+			// KHÔNG phạt 5 phút để tránh chain-reaction khóa toàn bộ hệ thống
+			h.sm.BreakSession(context.Background(), sessionID)
 			continue
 		}
 		break
@@ -511,7 +515,7 @@ func (h *ProxyHandler) handleAnthropicStandard(c *gin.Context, cfBody io.Reader,
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 50
 	}
-	h.sm.TrackUsage(c.Request.Context(), accountID, estimatedNeurons)
+	h.sm.TrackUsage(context.Background(), accountID, estimatedNeurons)
 }
 
 // handleAnthropicStream chuyển đổi và phát dòng chảy sự kiện SSE chuẩn Anthropic từ dữ liệu thô Cloudflare.
@@ -962,7 +966,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 					if inToolCallBuf {
 						toolCallBuf.WriteString(token)
 						bufStr := toolCallBuf.String()
-						
+
 						// Check if the tool call has ended
 						hasEnded := false
 						isXML := strings.Contains(bufStr, "<tools>") || strings.Contains(bufStr, "<tool_use>")
@@ -971,43 +975,43 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 						} else {
 							hasEnded = strings.HasSuffix(strings.TrimSpace(bufStr), "}")
 						}
-						
+
 						if hasEnded {
 							var parsed bool
 							var toolCalls []map[string]interface{}
 							var textOutside string
-							
+
 							if isXML {
 								toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
 							} else {
 								toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
 							}
-							
+
 							if parsed {
 								hasToolUse = true
 								inToolCallBuf = false
 								toolCallBuf.Reset()
-								
+
 								if textOutside != "" {
 									sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
 								}
-								
+
 								toolBlockIndexOffset := activeBlockIndex + 1
 								for xmlIdx, tc := range toolCalls {
 									funcMap, _ := tc["function"].(map[string]interface{})
 									name, _ := funcMap["name"].(string)
 									args := funcMap["arguments"]
 									id, _ := tc["id"].(string)
-									
+
 									var argsMap map[string]interface{}
 									if am, ok := args.(map[string]interface{}); ok {
 										argsMap = am
 									}
 									argsBytes, _ := json.Marshal(argsMap)
 									argsStr := string(argsBytes)
-									
+
 									blkIdx := xmlIdx + toolBlockIndexOffset
-									
+
 									toolBlockStart := map[string]interface{}{
 										"type":  "content_block_start",
 										"index": blkIdx,
@@ -1019,7 +1023,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 									}
 									tbsBytes, _ := json.Marshal(toolBlockStart)
 									fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
-									
+
 									toolBlockDelta := map[string]interface{}{
 										"type":  "content_block_delta",
 										"index": blkIdx,
@@ -1030,7 +1034,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 									}
 									tbdBytes, _ := json.Marshal(toolBlockDelta)
 									fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
-									
+
 									toolBlockStop := map[string]interface{}{
 										"type":  "content_block_stop",
 										"index": blkIdx,
@@ -1044,7 +1048,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 						// Check if the token contains the start of a tool call
 						startIdx := -1
 						isXML := false
-						
+
 						if idx := strings.Index(token, "<tools>"); idx != -1 {
 							startIdx = idx
 							isXML = true
@@ -1058,19 +1062,19 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 							startIdx = idx
 							isXML = false
 						}
-						
+
 						if startIdx != -1 {
 							// Stream the text before the tool call
 							textBefore := token[:startIdx]
 							if textBefore != "" {
 								sendDeltaBlock(w, "text", activeBlockIndex, textBefore)
 							}
-							
+
 							// Start buffering
 							inToolCallBuf = true
 							toolCallBuf.Reset()
 							toolCallBuf.WriteString(token[startIdx:])
-							
+
 							// Check if it also has ended in this same token
 							bufStr := toolCallBuf.String()
 							hasEnded := false
@@ -1079,43 +1083,43 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 							} else {
 								hasEnded = strings.HasSuffix(strings.TrimSpace(bufStr), "}")
 							}
-							
+
 							if hasEnded {
 								var parsed bool
 								var toolCalls []map[string]interface{}
 								var textOutside string
-								
+
 								if isXML {
 									toolCalls, textOutside, parsed = parseXMLToolCalls(bufStr)
 								} else {
 									toolCalls, textOutside, parsed = parseRawJSONToolCall(bufStr)
 								}
-								
+
 								if parsed {
 									hasToolUse = true
 									inToolCallBuf = false
 									toolCallBuf.Reset()
-									
+
 									if textOutside != "" {
 										sendDeltaBlock(w, "text", activeBlockIndex, textOutside)
 									}
-									
+
 									toolBlockIndexOffset := activeBlockIndex + 1
 									for xmlIdx, tc := range toolCalls {
 										funcMap, _ := tc["function"].(map[string]interface{})
 										name, _ := funcMap["name"].(string)
 										args := funcMap["arguments"]
 										id, _ := tc["id"].(string)
-										
+
 										var argsMap map[string]interface{}
 										if am, ok := args.(map[string]interface{}); ok {
 											argsMap = am
 										}
 										argsBytes, _ := json.Marshal(argsMap)
 										argsStr := string(argsBytes)
-										
+
 										blkIdx := xmlIdx + toolBlockIndexOffset
-										
+
 										toolBlockStart := map[string]interface{}{
 											"type":  "content_block_start",
 											"index": blkIdx,
@@ -1127,7 +1131,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 										}
 										tbsBytes, _ := json.Marshal(toolBlockStart)
 										fmt.Fprintf(w, "event: content_block_start\ndata: %s\n\n", string(tbsBytes))
-										
+
 										toolBlockDelta := map[string]interface{}{
 											"type":  "content_block_delta",
 											"index": blkIdx,
@@ -1138,7 +1142,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 										}
 										tbdBytes, _ := json.Marshal(toolBlockDelta)
 										fmt.Fprintf(w, "event: content_block_delta\ndata: %s\n\n", string(tbdBytes))
-										
+
 										toolBlockStop := map[string]interface{}{
 											"type":  "content_block_stop",
 											"index": blkIdx,
@@ -1168,7 +1172,7 @@ func (h *ProxyHandler) handleAnthropicStream(c *gin.Context, cfBody io.Reader, a
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 10
 	}
-	h.sm.TrackUsage(c.Request.Context(), accountID, estimatedNeurons)
+	h.sm.TrackUsage(context.Background(), accountID, estimatedNeurons)
 }
 
 // estimatePromptTokens ước lượng số lượng tokens của prompt đầu vào bao gồm cả tin nhắn và định nghĩa công cụ.
@@ -1292,7 +1296,7 @@ func (h *ProxyHandler) handleStream(c *gin.Context, cfBody io.Reader, accountID,
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 10
 	}
-	h.sm.TrackUsage(c.Request.Context(), accountID, estimatedNeurons)
+	h.sm.TrackUsage(context.Background(), accountID, estimatedNeurons)
 }
 
 // handleStandard định dạng phản hồi JSON thường (Non-stream) chuẩn OpenAI.
@@ -1345,7 +1349,7 @@ func (h *ProxyHandler) handleStandard(c *gin.Context, cfBody io.Reader, accountI
 	if estimatedNeurons == 0 {
 		estimatedNeurons = 50
 	}
-	h.sm.TrackUsage(c.Request.Context(), accountID, estimatedNeurons)
+	h.sm.TrackUsage(context.Background(), accountID, estimatedNeurons)
 }
 
 // HandleListModels trả về danh sách các model đang hoạt động theo chuẩn OpenAI.
@@ -1915,7 +1919,7 @@ func parseThinkingTags(text string) (string, string) {
 		thinking := text[startIdx+len("<think>"):]
 		return strings.TrimSpace(thinking), ""
 	}
-	thinking := text[startIdx+len("<think>"):endIdx]
-	content := text[:startIdx] + text[endIdx+len("</think>"): ]
+	thinking := text[startIdx+len("<think>") : endIdx]
+	content := text[:startIdx] + text[endIdx+len("</think>"):]
 	return strings.TrimSpace(thinking), strings.TrimSpace(content)
 }
