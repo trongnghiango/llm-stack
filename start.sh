@@ -8,10 +8,13 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$PROJECT_ROOT/.env"
 ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
-PROXY_CONF="$PROJECT_ROOT/services/claude-proxy/config.json"
-PROXY_CONF_EXAMPLE="$PROJECT_ROOT/services/claude-proxy/config.json.example"
-CF_ACCOUNTS="$PROJECT_ROOT/services/cf-ai-proxy/accounts.csv"
-CF_ACCOUNTS_EXAMPLE="$PROJECT_ROOT/services/cf-ai-proxy/accounts.csv.example"
+CONFIG_DIR="$PROJECT_ROOT/config"
+PROXY_CONF="$CONFIG_DIR/proxy_routes.json"
+PROXY_CONF_EXAMPLE="$CONFIG_DIR/proxy_routes.json.example"
+CF_ACCOUNTS="$CONFIG_DIR/cf_accounts.csv"
+CF_ACCOUNTS_EXAMPLE="$CONFIG_DIR/cf_accounts.csv.example"
+NIM_ACCOUNTS="$CONFIG_DIR/nim_accounts.csv"
+NIM_ACCOUNTS_EXAMPLE="$CONFIG_DIR/nim_accounts.csv.example"
 
 # Centralized log directories
 LOGS_DIR="$PROJECT_ROOT/data/logs"
@@ -19,7 +22,10 @@ DB_DIR="$PROJECT_ROOT/data/omniroute"
 DB_PATH="$DB_DIR/storage.sqlite"
 INIT_SQL="$PROJECT_ROOT/data/init.sql"
 
-# 1. Tự động khởi tạo .env nếu chưa có và sinh key ngẫu nhiên bằng Python
+# Đảm bảo thư mục config tồn tại
+mkdir -p "$CONFIG_DIR"
+
+# 1. Tự động khởi tạo .env nếu chưa có và sinh key ngẫu nhiên bằng Python / OpenSSL
 if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_EXAMPLE" ]; then
   echo "ℹ️ Không tìm thấy .env. Tự động tạo từ .env.example..."
   cp "$ENV_EXAMPLE" "$ENV_FILE"
@@ -45,21 +51,33 @@ for line in lines:
 with open('$ENV_FILE', 'w') as f:
     f.writelines(new_lines)
 "
-  else:
-    echo "⚠️ Cảnh báo: Không tìm thấy python3 để tự động sinh khóa bảo mật. Vui lòng tự điền JWT_SECRET và API_KEY_SECRET trong file .env."
+  elif hash openssl 2>/dev/null; then
+    echo "🔑 Đang sinh khóa bảo mật ngẫu nhiên qua openssl..."
+    JWT_SEC=$(openssl rand -base64 48 | tr -d '\n')
+    API_SEC=$(openssl rand -hex 32 | tr -d '\n')
+    sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_SEC}|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+    sed -i.bak "s|^API_KEY_SECRET=.*|API_KEY_SECRET=${API_SEC}|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+  else
+    echo "⚠️ Cảnh báo: Vui lòng tự điền JWT_SECRET và API_KEY_SECRET trong file .env."
   fi
 fi
 
-# 2. Tự động khởi tạo config.json cho claude-proxy nếu chưa có
+# 2. Tự động khởi tạo proxy_routes.json cho claude-proxy nếu chưa có
 if [ ! -f "$PROXY_CONF" ] && [ -f "$PROXY_CONF_EXAMPLE" ]; then
-  echo "ℹ️ Tự động tạo services/claude-proxy/config.json từ bản ví dụ..."
+  echo "ℹ️ Tự động tạo config/proxy_routes.json từ bản ví dụ..."
   cp "$PROXY_CONF_EXAMPLE" "$PROXY_CONF"
 fi
 
-# 3. Tự động khởi tạo accounts.csv cho cf-ai-proxy nếu chưa có
+# 3. Tự động khởi tạo cf_accounts.csv cho cf-ai-proxy nếu chưa có
 if [ ! -f "$CF_ACCOUNTS" ] && [ -f "$CF_ACCOUNTS_EXAMPLE" ]; then
-  echo "ℹ️ Tự động tạo services/cf-ai-proxy/accounts.csv từ bản ví dụ..."
+  echo "ℹ️ Tự động tạo config/cf_accounts.csv từ bản ví dụ..."
   cp "$CF_ACCOUNTS_EXAMPLE" "$CF_ACCOUNTS"
+fi
+
+# 4. Tự động khởi tạo nim_accounts.csv cho omniroute nếu chưa có
+if [ ! -f "$NIM_ACCOUNTS" ] && [ -f "$NIM_ACCOUNTS_EXAMPLE" ]; then
+  echo "ℹ️ Tự động tạo config/nim_accounts.csv từ bản ví dụ..."
+  cp "$NIM_ACCOUNTS_EXAMPLE" "$NIM_ACCOUNTS"
 fi
 
 # Load variables từ .env để Docker compose có thể đọc nếu không dùng shell environment
