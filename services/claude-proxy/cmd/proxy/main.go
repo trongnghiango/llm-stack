@@ -607,6 +607,171 @@ func chunkStringByRunes(s string, chunkSize int) []string {
 	return chunks
 }
 
+func cleanJSONFences(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "```json")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
+	return strings.TrimSpace(s)
+}
+
+func parseToolJSON(raw string) (string, interface{}, bool) {
+	raw = cleanJSONFences(raw)
+	sanitized := sanitizeJSONString(raw)
+	var parsedTool map[string]interface{}
+	if err := json.Unmarshal([]byte(sanitized), &parsedTool); err == nil {
+		if n, ok := parsedTool["name"].(string); ok && n != "" {
+			if args, ok := parsedTool["arguments"]; ok {
+				return n, args, true
+			}
+			if input, ok := parsedTool["input"]; ok {
+				return n, input, true
+			}
+			if params, ok := parsedTool["parameters"]; ok {
+				return n, params, true
+			}
+			return n, map[string]interface{}{}, true
+		}
+	}
+	return "", nil, false
+}
+
+func findToolJSONBlock(s string) []int {
+	n := len(s)
+	for i := 0; i < n; i++ {
+		if s[i] == '{' {
+			depth := 0
+			inString := false
+			escape := false
+			for j := i; j < n; j++ {
+				c := s[j]
+				if escape {
+					escape = false
+					continue
+				}
+				if c == '\\' && inString {
+					escape = true
+					continue
+				}
+				if c == '"' {
+					inString = !inString
+					continue
+				}
+				if !inString {
+					if c == '{' {
+						depth++
+					} else if c == '}' {
+						depth--
+						if depth == 0 {
+							candidate := s[i : j+1]
+							if strings.Contains(candidate, `"name"`) &&
+								(strings.Contains(candidate, `"arguments"`) || strings.Contains(candidate, `"input"`) || strings.Contains(candidate, `"parameters"`)) {
+								return []int{i, j + 1}
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func parseToolFromText(text string) (textToStream string, toolName string, argsJSON string, hasTool bool) {
+	textToStream = text
+	argsJSON = "{}"
+
+	setTool := func(name string, args interface{}, prefixText string) bool {
+		if name == "" {
+			return false
+		}
+		toolName = name
+		hasTool = true
+		textToStream = strings.TrimSpace(prefixText)
+
+		if args != nil {
+			if str, ok := args.(string); ok {
+				argsJSON = str
+			} else {
+				b, _ := json.Marshal(args)
+				argsJSON = string(b)
+			}
+		}
+		if argsJSON == "" || argsJSON == "null" {
+			argsJSON = "{}"
+		}
+		return true
+	}
+
+	// 1. Tags: <tools>...</tools>, <tool_call>...</tool_call>, <tool>...</tool>
+	tags := [][]string{
+		{"<tools>", "</tools>"},
+		{"<tool_call>", "</tool_call>"},
+		{"<tool>", "</tool>"},
+	}
+	for _, pair := range tags {
+		startTag, endTag := pair[0], pair[1]
+		startIdx := strings.Index(text, startTag)
+		if startIdx >= 0 {
+			endIdx := strings.Index(text, endTag)
+			var raw string
+			if endIdx > startIdx {
+				raw = strings.TrimSpace(text[startIdx+len(startTag) : endIdx])
+			} else {
+				raw = strings.TrimSpace(text[startIdx+len(startTag):])
+			}
+			if n, a, ok := parseToolJSON(raw); ok {
+				if setTool(n, a, text[:startIdx]) {
+					return
+				}
+			}
+		}
+	}
+
+	// 2. Special tokens: e.g. <|start|>assistant...<|message|>(JSON)<|call|>
+	if msgIdx := strings.Index(text, "<|message|>"); msgIdx >= 0 {
+		raw := text[msgIdx+len("<|message|>"):]
+		if callIdx := strings.Index(raw, "<|call|>"); callIdx >= 0 {
+			raw = raw[:callIdx]
+		}
+		if n, a, ok := parseToolJSON(raw); ok {
+			prefix := text[:msgIdx]
+			if startTagIdx := strings.LastIndex(prefix, "<|start|>"); startTagIdx >= 0 {
+				prefix = prefix[:startTagIdx]
+			}
+			if setTool(n, a, prefix) {
+				return
+			}
+		}
+	}
+
+	// 3. Markdown code fence containing tool JSON: ```json ... ```
+	fenceRegex := regexp.MustCompile("(?s)```(?:json)?\\s*(\\{[\\s\\S]*?\\})\\s*```")
+	if matches := fenceRegex.FindAllStringSubmatchIndex(text, -1); len(matches) > 0 {
+		for _, m := range matches {
+			raw := text[m[2]:m[3]]
+			if n, a, ok := parseToolJSON(raw); ok {
+				if setTool(n, a, text[:m[0]]) {
+					return
+				}
+			}
+		}
+	}
+
+	// 4. Raw JSON block matching { "name": ..., "arguments": ... }
+	if loc := findToolJSONBlock(text); loc != nil {
+		raw := text[loc[0]:loc[1]]
+		if n, a, ok := parseToolJSON(raw); ok {
+			if setTool(n, a, text[:loc[0]]) {
+				return
+			}
+		}
+	}
+
+	return
+}
+
 func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 	flusher, _ := w.(http.Flusher)
 	flush := func() {
@@ -615,77 +780,9 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 		}
 	}
 
-	var textToStream = text
-	var toolRawJSON string
-
-	// Look for <tools>...</tools> or <tool_call>...</tool_call>
-	startTag := "<tools>"
-	endTag := "</tools>"
-	startIdx := strings.Index(text, startTag)
-	endIdx := strings.Index(text, endTag)
-
-	if startIdx < 0 {
-		startTag = "<tool_call>"
-		endTag = "</tool_call>"
-		startIdx = strings.Index(text, startTag)
-		endIdx = strings.Index(text, endTag)
-	}
-
-	if startIdx >= 0 && endIdx > startIdx {
-		textToStream = strings.TrimSpace(text[:startIdx])
-		toolRawJSON = strings.TrimSpace(text[startIdx+len(startTag) : endIdx])
-	} else if startIdx >= 0 {
-		textToStream = strings.TrimSpace(text[:startIdx])
-		toolRawJSON = strings.TrimSpace(text[startIdx+len(startTag):])
-	}
-
-	// Clean code fence blocks if model wrapped JSON in ```json ... ```
-	toolRawJSON = strings.TrimPrefix(toolRawJSON, "```json")
-	toolRawJSON = strings.TrimPrefix(toolRawJSON, "```")
-	toolRawJSON = strings.TrimSuffix(toolRawJSON, "```")
-	toolRawJSON = strings.TrimSpace(toolRawJSON)
-
-	var hasTool bool
-	var toolName string
-	var argsJSON string = "{}"
-
-	if toolRawJSON != "" {
-		sanitized := sanitizeJSONString(toolRawJSON)
-		var parsedTool map[string]interface{}
-		if err := json.Unmarshal([]byte(sanitized), &parsedTool); err == nil {
-			if n, ok := parsedTool["name"].(string); ok && n != "" {
-				toolName = n
-				hasTool = true
-				if args, ok := parsedTool["arguments"]; ok {
-					if argsStr, ok := args.(string); ok {
-						argsJSON = argsStr
-					} else {
-						b, _ := json.Marshal(args)
-						argsJSON = string(b)
-					}
-				} else if input, ok := parsedTool["input"]; ok {
-					if inputStr, ok := input.(string); ok {
-						argsJSON = inputStr
-					} else {
-						b, _ := json.Marshal(input)
-						argsJSON = string(b)
-					}
-				}
-				logger.Infof("[Spoof-Stream] Intercepted tool: %s args=%.150s", toolName, argsJSON)
-			}
-		} else {
-			logger.Warnf("[Spoof-Stream] Standard JSON parse failed: %s err=%v, attempting regex extraction", toolRawJSON[:min(len(toolRawJSON), 100)], err)
-			nameRegex := regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`)
-			if match := nameRegex.FindStringSubmatch(sanitized); len(match) > 1 {
-				toolName = match[1]
-				hasTool = true
-				argsRegex := regexp.MustCompile(`"(?:arguments|input)"\s*:\s*(\{[\s\S]*\})`)
-				if argMatch := argsRegex.FindStringSubmatch(sanitized); len(argMatch) > 1 {
-					argsJSON = argMatch[1]
-				}
-				logger.Infof("[Spoof-Stream] Intercepted tool via regex fallback: %s args=%.150s", toolName, argsJSON)
-			}
-		}
+	textToStream, toolName, argsJSON, hasTool := parseToolFromText(text)
+	if hasTool {
+		logger.Infof("[Spoof-Stream] Intercepted tool call: %s args=%.150s", toolName, argsJSON)
 	}
 
 	msgID := fmt.Sprintf("msg_spoof_%d", time.Now().UnixNano())

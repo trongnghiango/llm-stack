@@ -94,6 +94,55 @@ func TestEmitSpoofedAnthropicStream_WithMarkdownAndText(t *testing.T) {
 	}
 }
 
+func TestEmitSpoofedAnthropicStream_RawJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	input := `● {
+    "name": "AskUserQuestion",
+    "arguments": {
+      "questions": [
+        {
+          "question": "Bạn muốn tạo bản sao tiếng Việt của file nào?",
+          "header": "File target"
+        }
+      ]
+    }
+  }`
+
+	emitSpoofedAnthropicStream(rec, input)
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `"type":"tool_use"`) {
+		t.Error("missing tool_use content block for raw JSON")
+	}
+	if !strings.Contains(body, `"name":"AskUserQuestion"`) {
+		t.Error("missing tool name AskUserQuestion")
+	}
+	if !strings.Contains(body, `"stop_reason":"tool_use"`) {
+		t.Error("missing stop_reason tool_use")
+	}
+}
+
+func TestEmitSpoofedAnthropicStream_SpecialTokens(t *testing.T) {
+	rec := httptest.NewRecorder()
+	input := `<|start|>assistant<|channel|>commentary to=tool.run <|constrain|>json<|message|>{"name":"Read","arguments":{"file_path":"/home/ka/test.vtt"}}<|call|>`
+
+	emitSpoofedAnthropicStream(rec, input)
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `"type":"tool_use"`) {
+		t.Error("missing tool_use content block for special tokens")
+	}
+	if !strings.Contains(body, `"name":"Read"`) {
+		t.Error("missing tool name Read")
+	}
+	if !strings.Contains(body, "file_path") {
+		t.Error("missing file_path in tool input")
+	}
+	if !strings.Contains(body, `"stop_reason":"tool_use"`) {
+		t.Error("missing stop_reason tool_use")
+	}
+}
+
 func TestEmitSpoofedAnthropicStream_NoTool(t *testing.T) {
 	rec := httptest.NewRecorder()
 	input := "Xin chào, tôi là trợ lý AI."
