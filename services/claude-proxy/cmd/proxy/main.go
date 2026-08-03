@@ -279,9 +279,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	st := router.GetState()
 	targetModel := st.ModelRouter.Resolve(originalModel, promptText)
 
-	// Check if we need to spoof tools
+	// Check if we need to spoof tools (only if client actually provided tools)
 	modelSettings, hasSettings := st.Config.ModelSettings[targetModel]
-	isSpoofingTools := hasSettings && modelSettings.SpoofToolsXML
+	isSpoofingTools := hasSettings && modelSettings.SpoofToolsXML && len(textReq.Tools) > 0
 
 	if isSpoofingTools {
 		// Convert message history (tool_use -> <tools> XML, tool_result -> [Tool Result])
@@ -523,20 +523,26 @@ func extractTextFromSSE(bodyStr string) string {
 		if err := json.Unmarshal([]byte(jsonStr), &evt); err != nil {
 			continue
 		}
-		// Anthropic content_block_delta
-		if evtType, _ := evt["type"].(string); evtType == "content_block_delta" {
+		// Anthropic content_block_delta / thinking_delta
+		if evtType, _ := evt["type"].(string); evtType == "content_block_delta" || evtType == "thinking_delta" {
 			if delta, ok := evt["delta"].(map[string]interface{}); ok {
 				if txt, ok := delta["text"].(string); ok {
 					fullText.WriteString(txt)
+				} else if thinking, ok := delta["thinking"].(string); ok {
+					fullText.WriteString(thinking)
 				}
 			}
 		}
-		// OpenAI delta.content
+		// OpenAI delta.content / delta.reasoning_content
 		if choices, ok := evt["choices"].([]interface{}); ok && len(choices) > 0 {
 			if choice, ok := choices[0].(map[string]interface{}); ok {
 				if delta, ok := choice["delta"].(map[string]interface{}); ok {
 					if content, ok := delta["content"].(string); ok {
 						fullText.WriteString(content)
+					} else if reasoning, ok := delta["reasoning_content"].(string); ok {
+						fullText.WriteString(reasoning)
+					} else if reasoning, ok := delta["reasoning"].(string); ok {
+						fullText.WriteString(reasoning)
 					}
 				}
 			}
@@ -557,6 +563,8 @@ func extractTextFromJSON(bodyBytes []byte) string {
 			if block, ok := item.(map[string]interface{}); ok {
 				if txt, ok := block["text"].(string); ok {
 					sb.WriteString(txt)
+				} else if thinking, ok := block["thinking"].(string); ok {
+					sb.WriteString(thinking)
 				}
 			}
 		}
@@ -564,12 +572,18 @@ func extractTextFromJSON(bodyBytes []byte) string {
 			return sb.String()
 		}
 	}
-	// OpenAI choices[0].message.content
+	// OpenAI choices[0].message.content / reasoning_content
 	if choices, ok := generic["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
 			if msg, ok := choice["message"].(map[string]interface{}); ok {
-				if txt, ok := msg["content"].(string); ok {
+				if txt, ok := msg["content"].(string); ok && txt != "" {
 					return txt
+				}
+				if reasoning, ok := msg["reasoning_content"].(string); ok && reasoning != "" {
+					return reasoning
+				}
+				if reasoning, ok := msg["reasoning"].(string); ok && reasoning != "" {
+					return reasoning
 				}
 			}
 		}
