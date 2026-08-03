@@ -47,3 +47,8 @@ var HTTPClient = &http.Client{
 		},
 	},
 }
+
+// IntToStr converts an int to its decimal string representation.
+func IntToStr(n int) string {
+	return strconv.Itoa(n)
+}

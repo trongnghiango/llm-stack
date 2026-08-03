@@ -11,9 +11,9 @@ import (
 // RouterState holds all mutable global configuration state.
 // Swapped atomically via globalState — readers see a consistent snapshot.
 type RouterState struct {
-    // Existing fields ...
-    // SelectionRules are applied before LLM routing to short‑circuit decisions.
-    SelectionRules []config.SelectionRule
+	// Existing fields ...
+	// SelectionRules are applied before LLM routing to short‑circuit decisions.
+	SelectionRules   []config.SelectionRule
 	Config           config.Config
 	SemanticRuleMap  map[string][]config.SemanticRule
 	DecisionModelMap map[string]string

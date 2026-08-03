@@ -27,16 +27,16 @@ var (
 	})
 
 	// New metrics (added)
-    HeuristicMatchesTotal = prometheus.NewCounter(prometheus.CounterOpts{
-        Name: "router_heuristic_matches_total",
-        Help: "Number of routing decisions made via heuristic selection rules",
-    })
-    HeuristicMissesTotal = prometheus.NewCounter(prometheus.CounterOpts{
-        Name: "router_heuristic_misses_total",
-        Help: "Number of routing requests that did not match any heuristic rule",
-    })
+	HeuristicMatchesTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "router_heuristic_matches_total",
+		Help: "Number of routing decisions made via heuristic selection rules",
+	})
+	HeuristicMissesTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "router_heuristic_misses_total",
+		Help: "Number of routing requests that did not match any heuristic rule",
+	})
 	LlmErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-    // Existing counters ...
+		// Existing counters ...
 
 		Name: "router_llm_errors_total",
 		Help: "Total number of LLM classifier errors or FALLBACK decisions",

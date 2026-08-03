@@ -223,5 +223,3 @@ func TestCleanPromptForRouting(t *testing.T) {
 		t.Fatalf("expected 'Review clean code of proxy', got %q", cleaned)
 	}
 }
-
-

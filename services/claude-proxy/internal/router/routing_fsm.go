@@ -2,9 +2,9 @@ package router
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
-	"regexp"
 
 	"claude-proxy/internal/logger"
 	"claude-proxy/internal/metrics"

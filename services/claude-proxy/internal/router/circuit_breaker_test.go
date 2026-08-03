@@ -71,7 +71,7 @@ func TestCircuitBreaker_HalfOpenFailure(t *testing.T) {
 	cb.Allow()
 	cb.RecordFailure()
 	time.Sleep(20 * time.Millisecond)
-	cb.Allow() // probe
+	cb.Allow()         // probe
 	cb.RecordFailure() // probe fails — re-open
 
 	if cb.State() != "open" {
