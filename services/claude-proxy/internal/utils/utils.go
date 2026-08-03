@@ -33,12 +33,13 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 
 // HTTPClient is the global HTTP client reused across the service.
 var HTTPClient = &http.Client{
-	// Timeout for all outbound requests (configurable via HTTP_CLIENT_TIMEOUT env, default 30s)
-	Timeout: getEnvDuration("HTTP_CLIENT_TIMEOUT", 30*time.Second),
+	// Timeout for outbound requests (configurable via HTTP_CLIENT_TIMEOUT env, default 300s / 5m)
+	Timeout: getEnvDuration("HTTP_CLIENT_TIMEOUT", 300*time.Second),
 	Transport: &http.Transport{
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 120 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		DisableCompression:    true,
 		TLSClientConfig: &tls.Config{

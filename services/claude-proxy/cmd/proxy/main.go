@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -122,6 +123,60 @@ func convertMessagesForSpoofing(messages []Message) []Message {
 	return converted
 }
 
+var systemReminderRegex = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
+
+func cleanPromptForRouting(s string) string {
+	return systemReminderRegex.ReplaceAllString(s, "")
+}
+
+func sanitizeJSONString(s string) string {
+	var sb strings.Builder
+	sb.Grow(len(s) + 64)
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escaped {
+				sb.WriteByte(c)
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				sb.WriteByte(c)
+				continue
+			}
+			if c == '"' {
+				inString = false
+				sb.WriteByte(c)
+				continue
+			}
+			// Replace unescaped control characters inside JSON strings
+			if c == '\n' {
+				sb.WriteString(`\n`)
+				continue
+			}
+			if c == '\r' {
+				sb.WriteString(`\r`)
+				continue
+			}
+			if c == '\t' {
+				sb.WriteString(`\t`)
+				continue
+			}
+			sb.WriteByte(c)
+		} else {
+			if c == '"' {
+				inString = true
+			}
+			sb.WriteByte(c)
+		}
+	}
+	return sb.String()
+}
+
 func handleProxy(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if recoveryErr := recover(); recoveryErr != nil {
@@ -206,19 +261,19 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		var s string
 		if err := json.Unmarshal(msg.Content, &s); err == nil {
-			textBuilder.WriteString(" " + s)
+			textBuilder.WriteString(" " + cleanPromptForRouting(s))
 			continue
 		}
 		var blocks []MessageBlock
 		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
 			for _, b := range blocks {
 				if b.Type == "text" {
-					textBuilder.WriteString(" " + b.Text)
+					textBuilder.WriteString(" " + cleanPromptForRouting(b.Text))
 				}
 			}
 		}
 	}
-	promptText := textBuilder.String()
+	promptText := strings.TrimSpace(textBuilder.String())
 
 	// Resolve target model via router implementation (atomic state snapshot)
 	st := router.GetState()
@@ -522,6 +577,22 @@ func extractTextFromJSON(bodyBytes []byte) string {
 	return string(bodyBytes)
 }
 
+func chunkStringByRunes(s string, chunkSize int) []string {
+	if s == "" {
+		return nil
+	}
+	runes := []rune(s)
+	var chunks []string
+	for i := 0; i < len(runes); i += chunkSize {
+		end := i + chunkSize
+		if end > len(runes) {
+			end = len(runes)
+		}
+		chunks = append(chunks, string(runes[i:end]))
+	}
+	return chunks
+}
+
 func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 	flusher, _ := w.(http.Flusher)
 	flush := func() {
@@ -565,8 +636,9 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 	var argsJSON string = "{}"
 
 	if toolRawJSON != "" {
+		sanitized := sanitizeJSONString(toolRawJSON)
 		var parsedTool map[string]interface{}
-		if err := json.Unmarshal([]byte(toolRawJSON), &parsedTool); err == nil {
+		if err := json.Unmarshal([]byte(sanitized), &parsedTool); err == nil {
 			if n, ok := parsedTool["name"].(string); ok && n != "" {
 				toolName = n
 				hasTool = true
@@ -588,7 +660,17 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 				logger.Infof("[Spoof-Stream] Intercepted tool: %s args=%.150s", toolName, argsJSON)
 			}
 		} else {
-			logger.Warnf("[Spoof-Stream] Failed to parse tool JSON: %s err=%v", toolRawJSON[:min(len(toolRawJSON), 100)], err)
+			logger.Warnf("[Spoof-Stream] Standard JSON parse failed: %s err=%v, attempting regex extraction", toolRawJSON[:min(len(toolRawJSON), 100)], err)
+			nameRegex := regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`)
+			if match := nameRegex.FindStringSubmatch(sanitized); len(match) > 1 {
+				toolName = match[1]
+				hasTool = true
+				argsRegex := regexp.MustCompile(`"(?:arguments|input)"\s*:\s*(\{[\s\S]*\})`)
+				if argMatch := argsRegex.FindStringSubmatch(sanitized); len(argMatch) > 1 {
+					argsJSON = argMatch[1]
+				}
+				logger.Infof("[Spoof-Stream] Intercepted tool via regex fallback: %s args=%.150s", toolName, argsJSON)
+			}
 		}
 	}
 
@@ -604,13 +686,7 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 	if textToStream != "" || !hasTool {
 		w.Write([]byte(fmt.Sprintf("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n", blockIndex)))
 		
-		chunkSize := 40
-		for i := 0; i < len(textToStream); i += chunkSize {
-			end := i + chunkSize
-			if end > len(textToStream) {
-				end = len(textToStream)
-			}
-			chunk := textToStream[i:end]
+		for _, chunk := range chunkStringByRunes(textToStream, 40) {
 			chunkBytes, _ := json.Marshal(chunk)
 			w.Write([]byte(fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":%d,\"delta\":{\"type\":\"text_delta\",\"text\":%s}}\n\n", blockIndex, string(chunkBytes))))
 			flush()
@@ -626,13 +702,7 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 		toolID := fmt.Sprintf("toolu_spoof_%d", time.Now().UnixNano())
 		w.Write([]byte(fmt.Sprintf("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"tool_use\",\"id\":\"%s\",\"name\":\"%s\",\"input\":{}}}\n\n", blockIndex, toolID, toolName)))
 		
-		chunkSize := 40
-		for i := 0; i < len(argsJSON); i += chunkSize {
-			end := i + chunkSize
-			if end > len(argsJSON) {
-				end = len(argsJSON)
-			}
-			chunk := argsJSON[i:end]
+		for _, chunk := range chunkStringByRunes(argsJSON, 40) {
 			chunkBytes, _ := json.Marshal(chunk)
 			w.Write([]byte(fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":%d,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":%s}}\n\n", blockIndex, string(chunkBytes))))
 			flush()

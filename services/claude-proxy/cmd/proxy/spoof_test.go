@@ -151,3 +151,28 @@ func TestConvertMessagesForSpoofing(t *testing.T) {
 	}
 }
 
+func TestEmitSpoofedAnthropicStream_WithRawNewlinesInJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	// Raw literal newline inside the description string
+	input := "Tôi sẽ review code.\n<tools>{\"name\": \"Agent\", \"arguments\": {\"description\": \"Review code\nLine 2\", \"prompt\": \"Task details\"}}</tools>"
+
+	emitSpoofedAnthropicStream(rec, input)
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `"name":"Agent"`) {
+		t.Errorf("expected tool name Agent in output, got: %s", body)
+	}
+	if !strings.Contains(body, `"stop_reason":"tool_use"`) {
+		t.Errorf("expected stop_reason tool_use, got: %s", body)
+	}
+}
+
+func TestCleanPromptForRouting(t *testing.T) {
+	raw := "<system-reminder>\n# claudeMd documentation\nSome doc rules\n</system-reminder>\nReview clean code of proxy"
+	cleaned := strings.TrimSpace(cleanPromptForRouting(raw))
+	if cleaned != "Review clean code of proxy" {
+		t.Fatalf("expected 'Review clean code of proxy', got %q", cleaned)
+	}
+}
+
+
