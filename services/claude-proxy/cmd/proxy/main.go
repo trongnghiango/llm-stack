@@ -30,8 +30,13 @@ import (
 
 // Message structures
 type MessageBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Id        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseId string          `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
 }
 
 type Message struct {
@@ -40,9 +45,81 @@ type Message struct {
 }
 
 type AnthropicRequest struct {
-	Model    string          `json:"model"`
-	System   json.RawMessage `json:"system,omitempty"`
-	Messages []Message       `json:"messages,omitempty"`
+	Model      string          `json:"model"`
+	System     json.RawMessage `json:"system,omitempty"`
+	Messages   []Message       `json:"messages,omitempty"`
+	Tools      json.RawMessage `json:"tools,omitempty"`
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+	Stream     *bool           `json:"stream,omitempty"`
+}
+
+func convertMessagesForSpoofing(messages []Message) []Message {
+	converted := make([]Message, 0, len(messages))
+	for _, msg := range messages {
+		// Try string content
+		var strContent string
+		if err := json.Unmarshal(msg.Content, &strContent); err == nil {
+			converted = append(converted, msg)
+			continue
+		}
+
+		// Try []MessageBlock
+		var blocks []MessageBlock
+		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
+			var sb strings.Builder
+			for _, b := range blocks {
+				switch b.Type {
+				case "text":
+					if b.Text != "" {
+						if sb.Len() > 0 {
+							sb.WriteString("\n")
+						}
+						sb.WriteString(b.Text)
+					}
+				case "tool_use":
+					if sb.Len() > 0 {
+						sb.WriteString("\n")
+					}
+					argsStr := "{}"
+					if len(b.Input) > 0 {
+						argsStr = string(b.Input)
+					}
+					sb.WriteString(fmt.Sprintf("<tools>{\"name\": %q, \"arguments\": %s}</tools>", b.Name, argsStr))
+				case "tool_result":
+					if sb.Len() > 0 {
+						sb.WriteString("\n")
+					}
+					var resultText string
+					if len(b.Content) > 0 {
+						if err := json.Unmarshal(b.Content, &resultText); err != nil {
+							var innerBlocks []MessageBlock
+							if err := json.Unmarshal(b.Content, &innerBlocks); err == nil {
+								var innerSb strings.Builder
+								for _, ib := range innerBlocks {
+									if ib.Type == "text" {
+										innerSb.WriteString(ib.Text + "\n")
+									}
+								}
+								resultText = strings.TrimSpace(innerSb.String())
+							} else {
+								resultText = string(b.Content)
+							}
+						}
+					}
+					sb.WriteString(fmt.Sprintf("[Tool Result]:\n%s", resultText))
+				}
+			}
+			newBytes, _ := json.Marshal(sb.String())
+			converted = append(converted, Message{
+				Role:    msg.Role,
+				Content: newBytes,
+			})
+			continue
+		}
+
+		converted = append(converted, msg)
+	}
+	return converted
 }
 
 func handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +161,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	if len(bodyBytes) == 0 {
-		forwardRequest(w, r, bodyBytes)
+		forwardRequest(w, r, bodyBytes, false, false)
 		return
 	}
 
@@ -93,7 +170,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/messages" {
 			logger.Errorf("[Chẩn đoán] Gói tin gửi tới /v1/messages sai cấu trúc JSON: %v\n", err)
 		}
-		forwardRequest(w, r, bodyBytes)
+		forwardRequest(w, r, bodyBytes, false, false)
 		return
 	}
 
@@ -101,11 +178,11 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	if modelBytes, exists := rawData["model"]; exists {
 		if err := json.Unmarshal(modelBytes, &originalModel); err != nil {
 			logger.Errorf("[Router] Failed to parse model field: %v", err)
-			forwardRequest(w, r, bodyBytes)
+			forwardRequest(w, r, bodyBytes, false, false)
 			return
 		}
 	} else {
-		forwardRequest(w, r, bodyBytes)
+		forwardRequest(w, r, bodyBytes, false, false)
 		return
 	}
 
@@ -123,22 +200,10 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("[Router] Unable to parse request for prompt text: %v", err)
 	}
 	var textBuilder strings.Builder
-	if len(textReq.System) > 0 {
-		var systemStr string
-		if err := json.Unmarshal(textReq.System, &systemStr); err == nil {
-			textBuilder.WriteString(systemStr)
-		} else {
-			var systemBlocks []MessageBlock
-			if err := json.Unmarshal(textReq.System, &systemBlocks); err == nil {
-				for _, block := range systemBlocks {
-					if block.Type == "text" {
-						textBuilder.WriteString(" " + block.Text)
-					}
-				}
-			}
-		}
-	}
 	for _, msg := range textReq.Messages {
+		if msg.Role != "user" {
+			continue
+		}
 		var s string
 		if err := json.Unmarshal(msg.Content, &s); err == nil {
 			textBuilder.WriteString(" " + s)
@@ -156,7 +221,64 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	promptText := textBuilder.String()
 
 	// Resolve target model via router implementation (atomic state snapshot)
-	targetModel := router.GetState().ModelRouter.Resolve(originalModel, promptText)
+	st := router.GetState()
+	targetModel := st.ModelRouter.Resolve(originalModel, promptText)
+
+	// Check if we need to spoof tools
+	modelSettings, hasSettings := st.Config.ModelSettings[targetModel]
+	isSpoofingTools := hasSettings && modelSettings.SpoofToolsXML
+
+	if isSpoofingTools {
+		// Convert message history (tool_use -> <tools> XML, tool_result -> [Tool Result])
+		convertedMsgs := convertMessagesForSpoofing(textReq.Messages)
+		msgsBytes, _ := json.Marshal(convertedMsgs)
+		rawData["messages"] = msgsBytes
+
+		if len(textReq.Tools) > 0 {
+			logger.Infof("[Router] Spoofing Tools -> XML for targetModel: %s", targetModel)
+			toolSystemInstruction := "[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\n" +
+				"You are an AI assistant equipped with specific tools.\n" +
+				"When you need to call a tool, output ONLY a single XML block formatted exactly like this:\n" +
+				"<tools>{\"name\": \"exact_tool_name\", \"arguments\": {\"param\": \"value\"}}</tools>\n" +
+				"Do not write any explanation, markdown, or text before or after the XML block when calling a tool.\n" +
+				"When you receive a [Tool Result] in the conversation history, the tool has already been executed. Use the result to continue or finish answering the user in plain text without repeating the tool call."
+			
+			// Read existing system prompt if any
+			var systemStr string
+			if len(textReq.System) > 0 {
+				if err := json.Unmarshal(textReq.System, &systemStr); err != nil {
+					var systemBlocks []MessageBlock
+					if err := json.Unmarshal(textReq.System, &systemBlocks); err == nil {
+						var sb strings.Builder
+						for _, block := range systemBlocks {
+							if block.Type == "text" {
+								sb.WriteString(block.Text + "\n")
+							}
+						}
+						systemStr = sb.String()
+					}
+				}
+			}
+
+			if systemStr != "" {
+				systemStr += "\n\n" + toolSystemInstruction
+			} else {
+				systemStr = toolSystemInstruction
+			}
+
+			// Inject tool schemas into system prompt
+			toolsBytes, _ := json.Marshal(textReq.Tools)
+			systemStr += "\n\nAVAILABLE TOOLS:\n" + string(toolsBytes)
+
+			// Update System in rawData
+			sysBytes, _ := json.Marshal(systemStr)
+			rawData["system"] = sysBytes
+
+			// Remove native tools to avoid confusing upstream
+			delete(rawData, "tools")
+			delete(rawData, "tool_choice")
+		}
+	}
 
 	// Overwrite model field preserving other payload data
 	rawData["model"] = json.RawMessage(fmt.Sprintf("%q", targetModel))
@@ -167,7 +289,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	reqID := r.Header.Get("X-Request-ID")
 	logger.LogPayload(reqID, modifiedBody)
-	forwardRequest(w, r, modifiedBody)
+	
+	isFakeStream := hasSettings && modelSettings.FakeStream && textReq.Stream != nil && *textReq.Stream
+	forwardRequest(w, r, modifiedBody, isSpoofingTools, isFakeStream)
 }
 
 // Headers to drop before forwarding
@@ -188,7 +312,7 @@ func copySafeHeaders(dst, src http.Header) {
 	}
 }
 
-func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
+func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte, isSpoofingTools bool, isFakeStream bool) {
 	s := router.GetState()
 	upstreamURL, err := url.Parse(s.Config.UpstreamURL)
 	if err != nil {
@@ -255,6 +379,64 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
 		}
 	}
 
+	logger.Infof("[Response] isFakeStream=%v isStream=%v isSpoofingTools=%v status=%d contentType=%s", isFakeStream, isStream, isSpoofingTools, resp.StatusCode, resp.Header.Get("Content-Type"))
+
+	// Pass through upstream error responses directly
+	if resp.StatusCode >= 400 {
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+
+	// Case 1: Tool Spoofing (both streaming and non-streaming responses)
+	if isSpoofingTools {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logger.Errorf("[Spoof-Stream] Failed to read response body: %v", err)
+			http.Error(w, "Failed to read upstream response", http.StatusBadGateway)
+			return
+		}
+
+		var fullText string
+		if isStream {
+			fullText = extractTextFromSSE(string(bodyBytes))
+		} else {
+			fullText = extractTextFromJSON(bodyBytes)
+		}
+
+		logger.Infof("[Spoof-Stream] Extracted text (%d chars): %.200s", len(fullText), fullText)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+
+		emitSpoofedAnthropicStream(w, fullText)
+		return
+	}
+
+	// Case 2: Fake Stream (upstream is non-streaming JSON, client requested stream)
+	if isFakeStream && !isStream {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logger.Errorf("[FakeStream] Failed to read response body: %v", err)
+			http.Error(w, "Failed to read upstream response", http.StatusBadGateway)
+			return
+		}
+		fullText := extractTextFromJSON(bodyBytes)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+
+		emitSpoofedAnthropicStream(w, fullText)
+		return
+	}
+
+	// Case 3: Transparent Stream Forwarding
 	if isStream {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -265,8 +447,211 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte) {
 		return
 	}
 
+	// Case 4: Transparent Non-Streaming Response
+	logger.Infof("[Response] -> raw copy path")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+func extractTextFromSSE(bodyStr string) string {
+	var fullText strings.Builder
+	for _, line := range strings.Split(bodyStr, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		jsonStr := strings.TrimSpace(line[5:])
+		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+		var evt map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &evt); err != nil {
+			continue
+		}
+		// Anthropic content_block_delta
+		if evtType, _ := evt["type"].(string); evtType == "content_block_delta" {
+			if delta, ok := evt["delta"].(map[string]interface{}); ok {
+				if txt, ok := delta["text"].(string); ok {
+					fullText.WriteString(txt)
+				}
+			}
+		}
+		// OpenAI delta.content
+		if choices, ok := evt["choices"].([]interface{}); ok && len(choices) > 0 {
+			if choice, ok := choices[0].(map[string]interface{}); ok {
+				if delta, ok := choice["delta"].(map[string]interface{}); ok {
+					if content, ok := delta["content"].(string); ok {
+						fullText.WriteString(content)
+					}
+				}
+			}
+		}
+	}
+	return fullText.String()
+}
+
+func extractTextFromJSON(bodyBytes []byte) string {
+	var generic map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &generic); err != nil {
+		return string(bodyBytes)
+	}
+	// Anthropic content[0].text
+	if content, ok := generic["content"].([]interface{}); ok && len(content) > 0 {
+		var sb strings.Builder
+		for _, item := range content {
+			if block, ok := item.(map[string]interface{}); ok {
+				if txt, ok := block["text"].(string); ok {
+					sb.WriteString(txt)
+				}
+			}
+		}
+		if sb.Len() > 0 {
+			return sb.String()
+		}
+	}
+	// OpenAI choices[0].message.content
+	if choices, ok := generic["choices"].([]interface{}); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]interface{}); ok {
+			if msg, ok := choice["message"].(map[string]interface{}); ok {
+				if txt, ok := msg["content"].(string); ok {
+					return txt
+				}
+			}
+		}
+	}
+	return string(bodyBytes)
+}
+
+func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
+	flusher, _ := w.(http.Flusher)
+	flush := func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	var textToStream = text
+	var toolRawJSON string
+
+	// Look for <tools>...</tools> or <tool_call>...</tool_call>
+	startTag := "<tools>"
+	endTag := "</tools>"
+	startIdx := strings.Index(text, startTag)
+	endIdx := strings.Index(text, endTag)
+
+	if startIdx < 0 {
+		startTag = "<tool_call>"
+		endTag = "</tool_call>"
+		startIdx = strings.Index(text, startTag)
+		endIdx = strings.Index(text, endTag)
+	}
+
+	if startIdx >= 0 && endIdx > startIdx {
+		textToStream = strings.TrimSpace(text[:startIdx])
+		toolRawJSON = strings.TrimSpace(text[startIdx+len(startTag) : endIdx])
+	} else if startIdx >= 0 {
+		textToStream = strings.TrimSpace(text[:startIdx])
+		toolRawJSON = strings.TrimSpace(text[startIdx+len(startTag):])
+	}
+
+	// Clean code fence blocks if model wrapped JSON in ```json ... ```
+	toolRawJSON = strings.TrimPrefix(toolRawJSON, "```json")
+	toolRawJSON = strings.TrimPrefix(toolRawJSON, "```")
+	toolRawJSON = strings.TrimSuffix(toolRawJSON, "```")
+	toolRawJSON = strings.TrimSpace(toolRawJSON)
+
+	var hasTool bool
+	var toolName string
+	var argsJSON string = "{}"
+
+	if toolRawJSON != "" {
+		var parsedTool map[string]interface{}
+		if err := json.Unmarshal([]byte(toolRawJSON), &parsedTool); err == nil {
+			if n, ok := parsedTool["name"].(string); ok && n != "" {
+				toolName = n
+				hasTool = true
+				if args, ok := parsedTool["arguments"]; ok {
+					if argsStr, ok := args.(string); ok {
+						argsJSON = argsStr
+					} else {
+						b, _ := json.Marshal(args)
+						argsJSON = string(b)
+					}
+				} else if input, ok := parsedTool["input"]; ok {
+					if inputStr, ok := input.(string); ok {
+						argsJSON = inputStr
+					} else {
+						b, _ := json.Marshal(input)
+						argsJSON = string(b)
+					}
+				}
+				logger.Infof("[Spoof-Stream] Intercepted tool: %s args=%.150s", toolName, argsJSON)
+			}
+		} else {
+			logger.Warnf("[Spoof-Stream] Failed to parse tool JSON: %s err=%v", toolRawJSON[:min(len(toolRawJSON), 100)], err)
+		}
+	}
+
+	msgID := fmt.Sprintf("msg_spoof_%d", time.Now().UnixNano())
+
+	// 1. message_start
+	w.Write([]byte(fmt.Sprintf("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"%s\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-7-sonnet-20250219\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n", msgID)))
+	flush()
+
+	blockIndex := 0
+
+	// 2. Text block (if text exists before tool or if no tool)
+	if textToStream != "" || !hasTool {
+		w.Write([]byte(fmt.Sprintf("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n", blockIndex)))
+		
+		chunkSize := 40
+		for i := 0; i < len(textToStream); i += chunkSize {
+			end := i + chunkSize
+			if end > len(textToStream) {
+				end = len(textToStream)
+			}
+			chunk := textToStream[i:end]
+			chunkBytes, _ := json.Marshal(chunk)
+			w.Write([]byte(fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":%d,\"delta\":{\"type\":\"text_delta\",\"text\":%s}}\n\n", blockIndex, string(chunkBytes))))
+			flush()
+		}
+		
+		w.Write([]byte(fmt.Sprintf("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":%d}\n\n", blockIndex)))
+		flush()
+		blockIndex++
+	}
+
+	// 3. Tool block (if tool found)
+	if hasTool {
+		toolID := fmt.Sprintf("toolu_spoof_%d", time.Now().UnixNano())
+		w.Write([]byte(fmt.Sprintf("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"tool_use\",\"id\":\"%s\",\"name\":\"%s\",\"input\":{}}}\n\n", blockIndex, toolID, toolName)))
+		
+		chunkSize := 40
+		for i := 0; i < len(argsJSON); i += chunkSize {
+			end := i + chunkSize
+			if end > len(argsJSON) {
+				end = len(argsJSON)
+			}
+			chunk := argsJSON[i:end]
+			chunkBytes, _ := json.Marshal(chunk)
+			w.Write([]byte(fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":%d,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":%s}}\n\n", blockIndex, string(chunkBytes))))
+			flush()
+		}
+		
+		w.Write([]byte(fmt.Sprintf("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":%d}\n\n", blockIndex)))
+		flush()
+	}
+
+	// 4. message_delta
+	stopReason := "end_turn"
+	if hasTool {
+		stopReason = "tool_use"
+	}
+	w.Write([]byte(fmt.Sprintf("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"%s\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":0}}\n\n", stopReason)))
+
+	// 5. message_stop
+	w.Write([]byte("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	flush()
 }
 
 func forwardStreamWithValidation(w http.ResponseWriter, resp *http.Response) {
@@ -276,50 +661,19 @@ func forwardStreamWithValidation(w http.ResponseWriter, resp *http.Response) {
 		return
 	}
 	
-	// Setup line-by-line reading for SSE validation.
-	// SSE events are separated by double newline \n\n
 	scanner := bufio.NewScanner(resp.Body)
-	
-	// Using custom split function for SSE
-	splitSSE := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-		if atEOF && len(data) == 0 {
-			return 0, nil, nil
-		}
-		
-		if i := bytes.Index(data, []byte("\n\n")); i >= 0 {
-			// We have a full SSE event
-			return i + 2, data[0:i], nil
-		}
-		
-		if atEOF {
-			return len(data), data, nil
-		}
-		
-		// Request more data
-		return 0, nil, nil
-	}
-	
-	// Up to 1MB per SSE event payload capacity
-	buf := make([]byte, 8192)
+	buf := make([]byte, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
-	scanner.Split(splitSSE)
 
 	strictMode := os.Getenv("STRICT_SCHEMA_VALIDATION") == "true"
 
 	for scanner.Scan() {
-		eventData := scanner.Bytes()
-		
-		// Write original data back plus double newline
-		payloadToWrite := eventData
-		
+		line := scanner.Bytes()
+		payloadToWrite := line
 		var shouldForward = true
 
-		// Find data: row
-		if dIdx := bytes.Index(eventData, []byte("data: ")); dIdx >= 0 {
-			jsonPayload := eventData[dIdx+6:]
-			// Just simple cleanup before JSON validation
-			jsonPayload = bytes.TrimSpace(jsonPayload) 
-			
+		if dIdx := bytes.Index(line, []byte("data:")); dIdx >= 0 {
+			jsonPayload := bytes.TrimSpace(line[dIdx+5:])
 			if len(jsonPayload) > 0 && string(jsonPayload) != "[DONE]" {
 				if !json.Valid(jsonPayload) {
 					metrics.SseValidationErrorsTotal.Inc()
@@ -331,11 +685,10 @@ func forwardStreamWithValidation(w http.ResponseWriter, resp *http.Response) {
 					if strictMode {
 						logger.Errorf("[Stream Parse Error] STRICT MODE: JSON hỏng. Ngắt kết nối. Chunk: %s", chunkTruncated)
 						shouldForward = false
-						// Trả về error dạng SSE 
 						errEvent := "event: error\ndata: {\"error\": {\"type\": \"stream_parse_error\", \"message\": \"Strict mode terminated connection due to invalid schema structure from Upstream.\"}}\n\n"
 						w.Write([]byte(errEvent))
 						flusher.Flush()
-						return // Terminate loop & conn
+						return
 					} else {
 						logger.Warnf("[Stream Parse] Bỏ qua JSON hỏng. Chunk: %s", chunkTruncated)
 						shouldForward = false
@@ -348,7 +701,7 @@ func forwardStreamWithValidation(w http.ResponseWriter, resp *http.Response) {
 
 		if shouldForward {
 			w.Write(payloadToWrite)
-			w.Write([]byte("\n\n"))
+			w.Write([]byte("\n"))
 		}
 		flusher.Flush()
 	}

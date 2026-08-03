@@ -15,8 +15,10 @@ type DecisionMapping struct {
 }
 
 type ModelSetting struct {
-	SystemPrompt string            `json:"system_prompt,omitempty"`
-	DecisionMap  []DecisionMapping `json:"decision_map,omitempty"`
+	SystemPrompt  string            `json:"system_prompt,omitempty"`
+	DecisionMap   []DecisionMapping `json:"decision_map,omitempty"`
+	SpoofToolsXML bool              `json:"spoof_tools_xml,omitempty"`
+	FakeStream    bool              `json:"fake_stream,omitempty"`
 }
 
 type SelectionRule struct {

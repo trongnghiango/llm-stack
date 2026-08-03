@@ -78,5 +78,22 @@
     }
   ],
 
-  "model_settings": {}
+  "model_settings": {
+    "ka.simple": {
+      "spoof_tools_xml": true,
+      "fake_stream": true
+    },
+    "ka.base": {
+      "spoof_tools_xml": true,
+      "fake_stream": true
+    },
+    "ka.reason": {
+      "spoof_tools_xml": true,
+      "fake_stream": true
+    },
+    "ka.docs": {
+      "spoof_tools_xml": true,
+      "fake_stream": true
+    }
+  }
 }
