@@ -14,13 +14,20 @@ def is_valid_uuid(val):
         return False
 
 def sync_nim():
-    # Sử dụng duy nhất đường dẫn trong dự án hợp nhất llm-stack
-    project_dir = "/home/ka/Repos/github.com/trongnghiango/llm-stack"
-    csv_path = os.path.join(project_dir, "NIM_accounts.csv")
-    db_path = os.path.join(project_dir, "data/omniroute/storage.sqlite")
+    # Tự động nhận diện thư mục gốc của dự án (hỗ trợ Windows, macOS, Linux)
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Ưu tiên đọc từ config/nim_accounts.csv, fallback về thư mục gốc nếu có
+    csv_path = os.path.join(project_dir, "config", "nim_accounts.csv")
+    if not os.path.exists(csv_path):
+        legacy_csv = os.path.join(project_dir, "NIM_accounts.csv")
+        if os.path.exists(legacy_csv):
+            csv_path = legacy_csv
+
+    db_path = os.path.join(project_dir, "data", "omniroute", "storage.sqlite")
 
     if not os.path.exists(csv_path):
-        print(f"❌ Không tìm thấy file {csv_path}")
+        print(f"❌ Không tìm thấy file {csv_path} (hoặc config/nim_accounts.csv)")
         return
 
     if not os.path.exists(db_path):
@@ -36,15 +43,17 @@ def sync_nim():
             
             for row in reader:
                 if row.get("name") and row.get("token"):
+                    acc_name = row["name"].strip()
                     csv_id = row.get("ID", "").strip()
-                    conn_id = csv_id
-                    # Tự sinh UUID nếu ID rỗng hoặc không đúng định dạng
-                    if not csv_id or not is_valid_uuid(csv_id):
-                        conn_id = str(uuid.uuid4())
+                    # Sử dụng UUID từ CSV nếu chuẩn, nếu không sinh deterministic UUID theo tên tài khoản để ID luôn cố định
+                    if csv_id and is_valid_uuid(csv_id):
+                        conn_id = csv_id
+                    else:
+                        conn_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"omniroute-nim-{acc_name}"))
 
                     accounts.append({
                         "id": conn_id,
-                        "name": row["name"].strip(),
+                        "name": acc_name,
                         "token": row["token"].strip(),
                         "expiration": row.get("expiration", "").strip()
                     })
@@ -69,6 +78,7 @@ def sync_nim():
 
         # 3. Inject các Connections loại 'nvidia' chuẩn của OmniRoute
         injected_count = 0
+        nim_conns = []
         for acc in accounts:
             conn_id = acc["id"]
             conn_name = acc["name"]
@@ -77,7 +87,8 @@ def sync_nim():
             conn_data = {
                 "connectionProxyEnabled": False,
                 "connectionProxyUrl": "",
-                "connectionNoProxy": ""
+                "connectionNoProxy": "",
+                "apiKeyHealth": {}
             }
 
             cursor.execute("""
@@ -87,8 +98,8 @@ def sync_nim():
             """, (
                 conn_id,
                 "nvidia",       # provider
-                "apikey",       # auth_type (Loại xác thực là apikey)
-                conn_name,      # name (Tên connection ví dụ NIM_GOON_003)
+                "apikey",       # auth_type
+                conn_name,      # name
                 1,              # priority
                 1,              # is_active = true
                 api_key,
@@ -97,11 +108,64 @@ def sync_nim():
                 datetime.now().isoformat() + "Z"
             ))
             injected_count += 1
+            nim_conns.append((conn_id, conn_name))
             print(f"  ⚡ Đã nạp Connection: {conn_name} (ID: {conn_id})")
+
+        # 4. Tự động cập nhật combo ka.reason để đảm bảo định tuyến luôn hoạt động mượt mà
+        ag_conns = cursor.execute('SELECT id, name FROM provider_connections WHERE provider="antigravity"').fetchall()
+        reason_models = []
+        for cid, cname in ag_conns:
+            reason_models.append({
+                'id': f'ka-reason-ag-oss-{cid}',
+                'kind': 'model',
+                'model': 'antigravity/gpt-oss-120b-medium',
+                'providerId': 'antigravity',
+                'connectionId': cid,
+                'weight': 100,
+                'label': f'AG-120B ({cname})'
+            })
+        for cid, cname in ag_conns:
+            reason_models.append({
+                'id': f'ka-reason-ag-opus-{cid}',
+                'kind': 'model',
+                'model': 'antigravity/claude-opus-4-6-thinking',
+                'providerId': 'antigravity',
+                'connectionId': cid,
+                'weight': 80,
+                'label': f'AG-OpusThinking ({cname})'
+            })
+        for cid, cname in nim_conns:
+            reason_models.append({
+                'id': f'ka-reason-nim-{cid}',
+                'kind': 'model',
+                'model': 'openai/gpt-oss-120b',
+                'providerId': 'nvidia',
+                'connectionId': cid,
+                'weight': 50,
+                'label': f'NIM ({cname})'
+            })
+
+        reason_data = {
+            'id': 'combo-ka-reason',
+            'name': 'ka.reason',
+            'models': reason_models,
+            'strategy': 'quota-share',
+            'config': {
+                'maxRetries': 3,
+                'retryDelayMs': 1000,
+                'handoffThreshold': 0.85,
+                'trackMetrics': True,
+                'reasoningTokenBufferEnabled': True
+            },
+            'isHidden': False,
+            'sortOrder': 1,
+            'version': 2
+        }
+        cursor.execute('UPDATE combos SET data = ? WHERE name = "ka.reason"', (json.dumps(reason_data),))
 
         conn.commit()
         conn.close()
-        print(f"🎉 Đồng bộ thành công! Đã nạp {injected_count} connections NVIDIA NIM vào database của OmniRoute.")
+        print(f"🎉 Đồng bộ thành công! Đã nạp {injected_count} connections NVIDIA NIM và tối ưu combo ka.reason.")
 
     except sqlite3.Error as e:
         print(f"❌ Lỗi SQLite: {e}")

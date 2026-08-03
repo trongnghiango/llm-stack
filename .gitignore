@@ -1,27 +1,56 @@
-# Secrets
+# =============================================================================
+# llm-stack .gitignore
+# Bảo mật tuyệt đối: Không bao giờ commit Secret, API Key, Token, DB hay Log
+# =============================================================================
+
+# 1. Environment variables & Secrets
 .env
+.env.*
+*.env
+!.env.example
 
-# Runtime data (SQLite, logs, redis, backups)
+# 2. Centralized Config & Credentials
+config/*.csv
+!config/*.csv.example
+!config/cf_models.csv
+
+config/*.json
+!config/*.json.example
+
+# Legacy secret paths (phòng ngừa rò rỉ)
+NIM_accounts.csv
+services/cf-ai-proxy/accounts.csv
+services/claude-proxy/config.json
+
+# 3. Runtime Data & Databases (SQLite, Redis, Backups)
 data/
+*.sqlite
+*.sqlite3
+*.db
 *.tar.gz
+*.bak
 
-# Go build artifacts
+# 4. Logs & Scratch files
+logs/
+*.log
+temp.md
+scratch/
+*.vtt
+
+# 5. Build Artifacts & Binaries
 services/cf-ai-proxy/cf-ai-proxy
 services/claude-proxy/proxy
 services/claude-proxy/claude-proxy
-
-# Logs
-*.log
-logs/
-
-# Go test cache
 *.test
 *.out
 
-# OS
+# 6. Operating System & IDE
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Other
-NIM_accounts.csv
+# 7. Submodules / Vendor
 services/omniroute/

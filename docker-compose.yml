@@ -48,8 +48,8 @@ services:
       - TZ=${TZ:-Asia/Ho_Chi_Minh}
     volumes:
       # Mount CSV files để có thể edit mà không cần rebuild
-      - ./services/cf-ai-proxy/accounts.csv:/app/accounts.csv:ro
-      - ./services/cf-ai-proxy/models.csv:/app/models.csv:ro
+      - ./config/cf_accounts.csv:/app/accounts.csv:ro
+      - ./config/cf_models.csv:/app/models.csv:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -83,7 +83,7 @@ services:
       - ./data/omniroute:/app/data
       - ./data/logs/omniroute:/app/data/logs
       - ./data/logs/omniroute-calls:/app/data/call_logs
-      - ./NIM_accounts.csv:/app/NIM_accounts.csv:ro
+      - ./config/nim_accounts.csv:/app/NIM_accounts.csv:ro
     environment:
       - TZ=${TZ:-Asia/Ho_Chi_Minh}
       - PORT=20128
@@ -119,11 +119,12 @@ services:
       - "127.0.0.1:20129:20129"   # Chỉ bind localhost – Claude Code dùng
     environment:
       - BIND_ADDR=0.0.0.0
-      - HTTP_CLIENT_TIMEOUT=120
+      - HTTP_CLIENT_TIMEOUT=600
+      - HTTP_RESPONSE_HEADER_TIMEOUT=300
       - REDIS_URL=redis://redis:6379
     volumes:
       # Mount config để edit không cần rebuild
-      - ./services/claude-proxy/config.json:/app/config.json:ro
+      - ./config/proxy_routes.json:/app/config.json:ro
       - ./data/logs/claude-proxy:/app/logs
     depends_on:
       - omniroute
