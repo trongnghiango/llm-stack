@@ -1,65 +1,81 @@
-# llm-stack
+# 🚀 llm-stack
 
-Unified Docker Compose stack cho hệ thống LLM proxy: **Claude Code → cf-ai-proxy → Cloudflare Workers AI**.
+**Unified Multi-LLM Routing & Load-Balancing Gateway** dành cho Claude Code CLI và các ứng dụng AI.
 
-## Kiến trúc
+Hệ thống kết hợp **claude-proxy** (Anthropic rewriter), **OmniRoute** (load balancer/gateway) và **cf-ai-proxy** (Cloudflare Workers AI & NVIDIA NIM/Antigravity integration) nhằm mang lại trải nghiệm lập trình AI tốc độ cao, khả năng xử lý context lớn và hoàn toàn miễn phí.
 
-```
-Claude Code  (ANTHROPIC_BASE_URL=http://127.0.0.1:20129)
-     │
-     ▼  POST /v1/messages  model: "swe.engineer"
-claude-proxy  :20129
-     │  Rewrite model name: swe.* → ka.*
-     ▼  model: "ka.base"
-omniroute  :20128  [UI: http://localhost:20128]
-     │  Route ka.base → cf-ai-proxy/qwen-2.5-coder
-     ▼  POST /v1/messages  (Anthropic format)
-cf-ai-proxy  :20127  [internal only]
-     │  Convert Anthropic ↔ Cloudflare format
-     │  Load-balance qua nhiều CF accounts
-     ▼
-Cloudflare Workers AI
-(Qwen 2.5 Coder, Qwen3 30B, DeepSeek R1, LLaMA...)
-     +
-Redis  :6379  [session & quota tracking]
-```
+---
 
-## Khởi động nhanh
+## 🎯 Điểm Nổi Bật
 
+* **Trung tâm cấu hình tập trung (`config/`):** Quản lý toàn bộ tài khoản Cloudflare, NVIDIA NIM và routing rules tại một thư mục duy nhất.
+* **Bảo mật tuyệt đối:** Tự động loại trừ 100% secret, token, database khỏi Git tracking.
+* **Đa nền tảng (Cross-Platform):** Chạy 1-click mượt mà trên cả **Windows** (PowerShell / WSL2), **macOS** (Apple Silicon / Intel) và **Linux**.
+* **Định tuyến thông minh theo nhu cầu (Multi-Tier):**
+  * `swe.architect` $\rightarrow$ **`ka.reason`** (GPT-OSS 120B / Reasoning Model).
+  * `swe.engineer` $\rightarrow$ **`ka.base`** (Gemini 2.5 Flash / Fast Coding Agent).
+  * `swe.subagent` $\rightarrow$ **`ka.base`** (Subagents song song).
+  * `swe.utility` / `swe.knowledge` $\rightarrow$ **`ka.docs`** (Xử lý tài liệu context 1 Triệu tokens).
+
+---
+
+## ⚡ Khởi Động Nhanh
+
+### Trên Linux / macOS:
 ```bash
-# 1. Clone và setup
-git clone <repo> llm-stack
+git clone https://github.com/trongnghiango/llm-stack.git
 cd llm-stack
 
-# 2. Copy và điền secrets
-cp .env.example .env
-# Mở .env và điền CF_ACCOUNT_*_TOKEN
-
-# 3. Quản lý hệ thống bằng CLI `./stack`
+# Khởi động (Tự động sinh .env và nạp cấu hình ban đầu)
+chmod +x stack start.sh
 ./stack start
 
-# 4. Kiểm tra trạng thái
+# Kiểm tra trạng thái
 ./stack status
 ```
 
-## Model Mapping
+### Trên Windows (PowerShell):
+```powershell
+git clone https://github.com/trongnghiango/llm-stack.git
+cd llm-stack
 
-| Claude Code env var           | claude-proxy alias | ka.* alias | Model (qua cf-ai-proxy)          |
-|-------------------------------|--------------------|------------|----------------------------------|
-| `ANTHROPIC_DEFAULT_OPUS_MODEL`   | `swe.architect`    | `ka.reason`   | `qwen3-30b-a3b-fp8`              |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `swe.engineer`     | `ka.base`     | `qwen-2.5-coder`                 |
-| `CLAUDE_CODE_SUBAGENT_MODEL`     | `swe.subagent`     | `ka.base`     | `qwen-2.5-coder`                 |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL`  | `swe.utility`      | `ka.simple`/`ka.docs` | `deepseek-r1` / `llama-3.1-8b-fp8` |
-| `ANTHROPIC_CUSTOM_MODEL_OPTION`  | `swe.knowledge`    | `ka.docs`     | `llama-3.1-8b-instruct-fp8-fast` |
+# Khởi động bằng PowerShell
+.\stack.ps1 start
 
-## Cấu hình Claude Code
+# Kiểm tra trạng thái
+.\stack.ps1 status
+```
 
-Trong `~/.claude/settings.json`:
+---
+
+## 📂 Quản Lý Cấu Hình Tập Trung (`config/`)
+
+Toàn bộ thông tin tài khoản và quy tắc định tuyến nằm gọn trong thư mục `config/`:
+
+| File Cấu Hình | Mục Đích |
+| :--- | :--- |
+| **`config/cf_accounts.csv`** | Danh sách tài khoản Cloudflare Workers AI (tự động hot-reload sau 5s). |
+| **`config/nim_accounts.csv`** | Danh sách API token NVIDIA NIM (chạy `./stack sync-nim` để nạp vào DB). |
+| **`config/cf_models.csv`** | Danh mục model hỗ trợ trên Cloudflare Workers AI. |
+| **`config/proxy_routes.json`** | Quy tắc rewrite tên model và routing giữa Claude Code và OmniRoute. |
+| **`config/claude_settings.json.example`** | File mẫu cấu hình cho Claude Code CLI. |
+
+---
+
+## 💻 Kết Nối Claude Code CLI
+
+Thêm vào cấu hình shell (`~/.bashrc`, `~/.zshrc` hoặc PowerShell):
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20129"
+export ANTHROPIC_API_KEY="sk-omniroute"
+```
+
+Cấu hình các slot model trong `~/.claude/settings.json`:
 ```json
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:20129",
-    "ANTHROPIC_AUTH_TOKEN": "sk-local-dummy-token",
+    "ANTHROPIC_API_KEY": "sk-omniroute",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "swe.engineer",
     "ANTHROPIC_DEFAULT_OPUS_MODEL":   "swe.architect",
     "CLAUDE_CODE_SUBAGENT_MODEL":     "swe.subagent",
@@ -69,118 +85,22 @@ Trong `~/.claude/settings.json`:
 }
 ```
 
-## Services
+---
 
-| Service        | Port  | Mô tả                                      |
-|---------------|-------|--------------------------------------------|
-| `claude-proxy` | 20129 | Model rewriter, chỉ bind localhost         |
-| `omniroute`    | 20128 | LLM router + UI admin                      |
-| `cf-ai-proxy`  | 20127 | Cloudflare proxy (internal only)           |
-| `redis`        | —     | Session/quota storage (internal only)      |
+## 🛠️ Bộ Lệnh Quản Trị (`./stack` hoặc `.\stack.ps1`)
 
-## OmniRoute UI
- 
-Truy cập http://localhost:20128 để quản lý providers, models, và combos.
- 
-**Mật khẩu mặc định**: `llmstack2026` (hoặc cấu hình qua `INITIAL_PASSWORD` trong `.env`)
- 
-### 🔄 Cách đồng bộ toàn bộ Available Models từ cf-ai-proxy:
-1. Đăng nhập vào UI OmniRoute (http://localhost:20128).
-2. Vào mục **Providers**, kéo xuống phần Custom Provider **`CF-AI-PROXY-MAIN`**.
-3. Tại phần **Available Models**, click vào nút **`Import from /models`** ở góc phải.
-4. Hệ thống sẽ tự động fetch danh sách từ `http://cf-ai-proxy:20127/v1/models` và nạp đầy đủ 9 model được khai báo trong `models.csv` vào giao diện của bạn.
-
-
-## Available Models (qua cf-ai-proxy)
-
-| Alias                          | Cloudflare Model                              |
-|-------------------------------|-----------------------------------------------|
-| `qwen-2.5-coder`               | `@cf/qwen/qwen2.5-coder-32b-instruct`        |
-| `qwen3-30b-a3b-fp8`            | `@cf/qwen/qwen3-30b-a3b-fp8`                 |
-| `deepseek-r1-distill-qwen-32b` | `@cf/deepseek-ai/deepseek-r1-distill-qwen-32b` |
-| `qwen2.5-coder-7b-instruct`    | `@cf/qwen/qwen2.5-coder-32b-instruct`        |
-| `llama-3.1-8b`                 | `@cf/meta/llama-3.1-8b-instruct`             |
-| `llama-3.1-8b-instruct-fp8-fast` | `@cf/meta/llama-3.1-8b-instruct-fp8-fast`  |
-| `llama-3.1-70b`                | `@cf/meta/llama-3.1-70b-instruct`            |
-| `mistral-7b`                   | `@cf/mistralai/mistral-7b-instruct-v0.2`     |
-| `gemma-2-9b`                   | `@cf/google/gemma-2-9b-it`                   |
-
-## Thêm model mới
- 
-1. Thêm vào `services/cf-ai-proxy/models.csv`
-2. Thêm `INSERT INTO kv` vào `data/omniroute/db/init.sql`
-3. Xóa `data/omniroute/storage.sqlite` để seed lại
-4. `./stack restart omniroute`
-
-## Cấu trúc thư mục
-
-```
-llm-stack/
-├── docker-compose.yml
-├── .env.example          ← Template (commit)
-├── .env                  ← Secrets (KHÔNG commit)
-├── .gitignore
-├── README.md
-├── services/
-│   ├── claude-proxy/     ← Source + Dockerfile
-│   └── cf-ai-proxy/      ← Source + Dockerfile
-├── data/
-│   ├── omniroute/
-│   │   └── db/
-│   │       └── init.sql  ← Seed schema + data
-│   └── redis/            ← Redis persistence
-└── scripts/
-    └── sync_nim_accounts.py ← Sync NIM connections script
-```
-
-## Lệnh quản lý hệ thống (`./stack`)
-
-Dự án cung cấp CLI `./stack` thống nhất để quản trị stack.
-
-```bash
-# Xem hướng dẫn đầy đủ
-./stack help
-
-# Khởi động toàn bộ stack
-./stack start
-
-# Xem trạng thái các container
-./stack status
-
-# Xem logs thời gian thực (toàn bộ hoặc từng service)
-./stack logs
-./stack logs cf-ai-proxy
-
-# Khởi động lại service
-./stack restart omniroute
-
-# Xóa cache Redis
-./stack flush
-
-# Đồng bộ NVIDIA NIM
-./stack sync-nim
-
-# Dừng hệ thống
-./stack stop
-```
-
-## Cập nhật và Bảo đảm Dữ liệu (Update & Backup)
-
-Để nâng cấp dịch vụ lên phiên bản mới nhất (như `omniroute` hay `cf-ai-proxy`) mà không bị mất cấu hình và cơ sở dữ liệu SQLite:
-
-```bash
-# Cập nhật omniroute (mặc định sẽ tự động sao lưu dữ liệu SQLite/Auth sang file nén .tar.gz trước khi pull bản mới)
-./stack update
- 
-# Cập nhật một dịch vụ cụ thể
-./stack update cf-ai-proxy
-```
- 
-Quá trình `update` sẽ tự động:
-1. Tạo bản sao lưu dự phòng: `omniroute-backup-YYYYMMDD_HHMMSS.tar.gz` (nếu cập nhật `omniroute`).
-2. Kéo (pull) image docker mới nhất từ hub.
-3. Restart lại duy nhất container được chỉ định mà không tắt các thành phần khác.
+* `start` — Khởi động toàn bộ dịch vụ.
+* `stop` — Dừng toàn bộ dịch vụ.
+* `restart [service]` — Khởi động lại toàn bộ hoặc 1 container cụ thể.
+* `status` — Xem trạng thái hoạt động của các containers.
+* `logs [service]` — Xem logs thời gian thực.
+* `sync-nim` — Đồng bộ tài khoản NVIDIA NIM từ `config/nim_accounts.csv` vào database.
+* `flush` — Xóa sạch bộ nhớ đệm cache Redis.
+* `update` — Cập nhật bản dựng mới nhất của OmniRoute.
 
 ---
 
-## Cấu trúc thư mục
+## 📖 Tài Liệu Chi Tiết
+
+Xem hướng dẫn chi tiết từng bước cho từng hệ điều hành tại:
+👉 **[Tài Liệu Hướng Dẫn Triển Khai Toàn Diện (DEPLOYMENT_GUIDE.md)](docs/DEPLOYMENT_GUIDE.md)**
