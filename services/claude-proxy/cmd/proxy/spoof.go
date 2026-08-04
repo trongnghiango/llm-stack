@@ -91,13 +91,24 @@ func chunkStringByRunes(s string, chunkSize int) []string {
 // Tool-call JSON parsing
 // ─────────────────────────────────────────────
 
+// nameRe / argsRe are used as regex fallbacks when JSON.Unmarshal fails.
+var (
+	nameRe = regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`)
+	argsRe = regexp.MustCompile(`(?s)"(?:arguments|input|parameters)"\s*:\s*(\{.*?\}|\[.*?\])`)
+)
+
 // parseToolJSON attempts to extract (name, args, ok) from a raw JSON string
 // that is expected to represent a tool-call object:
 //
 //	{ "name": "...", "arguments"|"input"|"parameters": {...} }
+//
+// Falls back to regex extraction when JSON.Unmarshal fails (e.g. unescaped
+// newlines in command strings).
 func parseToolJSON(raw string) (string, interface{}, bool) {
 	raw = cleanJSONFences(raw)
 	sanitized := sanitizeJSONString(raw)
+
+	// Fast path: standard JSON decode
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(sanitized), &parsed); err == nil {
 		if name, ok := parsed["name"].(string); ok && name != "" {
@@ -109,7 +120,19 @@ func parseToolJSON(raw string) (string, interface{}, bool) {
 			return name, map[string]interface{}{}, true
 		}
 	}
-	return "", nil, false
+
+	// Slow path: regex fallback for malformed JSON (e.g. raw newlines in bash commands)
+	nameMatch := nameRe.FindStringSubmatch(sanitized)
+	if len(nameMatch) < 2 || nameMatch[1] == "" {
+		return "", nil, false
+	}
+	name := nameMatch[1]
+	argsStr := "{}"
+	if argsMatch := argsRe.FindStringSubmatch(sanitized); len(argsMatch) >= 2 {
+		argsStr = argsMatch[1]
+	}
+	logger.Warnf("[Spoof] Regex fallback for malformed JSON: tool=%s args=%.80s", name, argsStr)
+	return name, argsStr, true
 }
 
 // findToolJSONBlock scans s for the first JSON object that looks like a tool-call
@@ -163,40 +186,92 @@ func findToolJSONBlock(s string) []int {
 // Multi-format tool-call detection
 // ─────────────────────────────────────────────
 
-// parseToolFromText inspects text for a tool-call in any of the supported formats
-// and returns (textBeforeTool, toolName, argsJSON, found).
+// toolCall holds one extracted tool invocation.
+type toolCall struct {
+	Name string
+	Args string // JSON string
+}
+
+// xmlTagRe strips any XML-like <tag>...</tag> or <tag>... wrappers from text so
+// they never leak as raw characters into the streamed response.
+var xmlTagRe = regexp.MustCompile(`(?s)<(?:tools|tool_call|tool)>.*?(?:</(?:tools|tool_call|tool)>|$)`)
+
+// parseToolFromText inspects text for one or more tool-calls in any supported
+// format and returns:
 //
-// Detection order (first match wins):
+//	 textToStream  – text before the first tool call (safe to stream as text_delta)
+//	 calls         – ordered list of detected tool calls
+//
+// Detection order (first match wins per call):
 //  1. XML tags: <tools>, <tool_call>, <tool>
 //  2. Special LLM tokens: <|message|>...<|call|>
 //  3. Markdown fenced JSON: ```json { "name": ... } ```
-//  4. Raw JSON object anywhere in the text
+//  4. Raw JSON object containing "name" + "arguments"/"input"
 func parseToolFromText(text string) (textToStream, toolName, argsJSON string, hasTool bool) {
 	textToStream = text
 	argsJSON = "{}"
 
-	setTool := func(name string, args interface{}, prefix string) bool {
-		if name == "" {
-			return false
-		}
-		toolName = name
-		hasTool = true
-		textToStream = strings.TrimSpace(prefix)
-		if args != nil {
-			if s, ok := args.(string); ok {
-				argsJSON = s
-			} else {
-				b, _ := json.Marshal(args)
-				argsJSON = string(b)
-			}
-		}
-		if argsJSON == "" || argsJSON == "null" {
-			argsJSON = "{}"
-		}
-		return true
+	calls, prefixText := extractAllToolCalls(text)
+	if len(calls) == 0 {
+		return
 	}
 
-	// 1. XML tag pairs
+	hasTool = true
+	toolName = calls[0].Name
+	argsJSON = calls[0].Args
+	textToStream = strings.TrimSpace(prefixText)
+	return
+}
+
+// extractAllToolCalls finds every tool call embedded in text and returns them
+// in order along with any plain text that precedes the first call.
+func extractAllToolCalls(text string) (calls []toolCall, prefixText string) {
+	prefixText = text
+	working := text
+	firstPrefix := true
+
+	for {
+		call, pre, rest, found := extractOneToolCall(working)
+		if !found {
+			break
+		}
+		if firstPrefix {
+			prefixText = pre
+			firstPrefix = false
+		}
+		calls = append(calls, call)
+		if rest == "" {
+			break
+		}
+		working = rest
+	}
+	return
+}
+
+// extractOneToolCall finds the first tool call in text and returns:
+//
+//	 call       – the extracted tool
+//	 prefixText – text before the tool call
+//	 remainder  – text after the tool call (for chaining)
+//	 found      – whether a tool call was detected
+func extractOneToolCall(text string) (call toolCall, prefixText, remainder string, found bool) {
+	mkArgs := func(args interface{}) string {
+		if args == nil {
+			return "{}"
+		}
+		switch v := args.(type) {
+		case string:
+			if v == "" || v == "null" {
+				return "{}"
+			}
+			return v
+		default:
+			b, _ := json.Marshal(args)
+			return string(b)
+		}
+	}
+
+	// 1. XML tag pairs — try each tag family
 	for _, pair := range [][2]string{
 		{"<tools>", "</tools>"},
 		{"<tool_call>", "</tool_call>"},
@@ -208,31 +283,45 @@ func parseToolFromText(text string) (textToStream, toolName, argsJSON string, ha
 			continue
 		}
 		ei := strings.Index(text, endTag)
-		var raw string
+		var raw, after string
 		if ei > si {
 			raw = strings.TrimSpace(text[si+len(startTag) : ei])
+			after = text[ei+len(endTag):]
 		} else {
+			// No closing tag — consume to end but still mark as found
+			// to prevent raw XML leaking as text.
 			raw = strings.TrimSpace(text[si+len(startTag):])
+			after = ""
 		}
-		if n, a, ok := parseToolJSON(raw); ok && setTool(n, a, text[:si]) {
-			return
+		name, args, ok := parseToolJSON(raw)
+		if !ok {
+			// JSON parse failed but tag was found — extract name via regex
+			// and still suppress the raw XML from the output.
+			if m := nameRe.FindStringSubmatch(raw); len(m) >= 2 {
+				name = m[1]
+				ok = true
+				args = raw // pass raw string; mkArgs will use it as-is
+			}
+		}
+		if ok && name != "" {
+			return toolCall{Name: name, Args: mkArgs(args)}, text[:si], after, true
 		}
 	}
 
 	// 2. Special LLM tokens: <|message|>...<|call|>
 	if mi := strings.Index(text, "<|message|>"); mi >= 0 {
 		raw := text[mi+len("<|message|>"):]
+		after := ""
 		if ci := strings.Index(raw, "<|call|>"); ci >= 0 {
+			after = raw[ci+len("<|call|>"):]
 			raw = raw[:ci]
 		}
-		if n, a, ok := parseToolJSON(raw); ok {
+		if name, args, ok := parseToolJSON(raw); ok && name != "" {
 			prefix := text[:mi]
 			if si := strings.LastIndex(prefix, "<|start|>"); si >= 0 {
 				prefix = prefix[:si]
 			}
-			if setTool(n, a, prefix) {
-				return
-			}
+			return toolCall{Name: name, Args: mkArgs(args)}, prefix, after, true
 		}
 	}
 
@@ -240,20 +329,20 @@ func parseToolFromText(text string) (textToStream, toolName, argsJSON string, ha
 	fenceRe := regexp.MustCompile("(?s)```(?:json)?\\s*(\\{[\\s\\S]*?\\})\\s*```")
 	for _, m := range fenceRe.FindAllStringSubmatchIndex(text, -1) {
 		raw := text[m[2]:m[3]]
-		if n, a, ok := parseToolJSON(raw); ok && setTool(n, a, text[:m[0]]) {
-			return
+		if name, args, ok := parseToolJSON(raw); ok && name != "" {
+			return toolCall{Name: name, Args: mkArgs(args)}, text[:m[0]], text[m[1]:], true
 		}
 	}
 
 	// 4. Raw JSON block
 	if loc := findToolJSONBlock(text); loc != nil {
 		raw := text[loc[0]:loc[1]]
-		if n, a, ok := parseToolJSON(raw); ok && setTool(n, a, text[:loc[0]]) {
-			return
+		if name, args, ok := parseToolJSON(raw); ok && name != "" {
+			return toolCall{Name: name, Args: mkArgs(args)}, text[:loc[0]], text[loc[1]:], true
 		}
 	}
 
-	return
+	return toolCall{}, text, "", false
 }
 
 // ─────────────────────────────────────────────
@@ -261,8 +350,8 @@ func parseToolFromText(text string) (textToStream, toolName, argsJSON string, ha
 // ─────────────────────────────────────────────
 
 // emitSpoofedAnthropicStream converts a plain-text model response (which may
-// contain a tool-call in any supported format) into a well-formed Anthropic SSE
-// stream and writes it to w.
+// contain one or more tool-calls in any supported format) into a well-formed
+// Anthropic SSE stream and writes it to w.
 func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 	flusher, _ := w.(http.Flusher)
 	flush := func() {
@@ -271,9 +360,12 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 		}
 	}
 
-	textToStream, toolName, argsJSON, hasTool := parseToolFromText(text)
+	calls, prefixText := extractAllToolCalls(text)
+	hasTool := len(calls) > 0
 	if hasTool {
-		logger.Infof("[Spoof-Stream] Intercepted tool call: %s args=%.150s", toolName, argsJSON)
+		for _, c := range calls {
+			logger.Infof("[Spoof-Stream] Tool call: %s args=%.150s", c.Name, c.Args)
+		}
 	}
 
 	msgID := fmt.Sprintf("msg_spoof_%d", time.Now().UnixNano())
@@ -284,7 +376,8 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 
 	blockIdx := 0
 
-	// 2. Text block (if any prefix text, or if no tool)
+	// 2. Text block (prefix text or plain response with no tool)
+	textToStream := strings.TrimSpace(prefixText)
 	if textToStream != "" || !hasTool {
 		fmt.Fprintf(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n", blockIdx)
 		for _, chunk := range chunkStringByRunes(textToStream, 40) {
@@ -297,17 +390,18 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 		blockIdx++
 	}
 
-	// 3. Tool-use block (if tool detected)
-	if hasTool {
+	// 3. Tool-use blocks (one per detected call)
+	for _, tc := range calls {
 		toolID := fmt.Sprintf("toolu_spoof_%d", time.Now().UnixNano())
-		fmt.Fprintf(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"tool_use\",\"id\":%q,\"name\":%q,\"input\":{}}}\n\n", blockIdx, toolID, toolName)
-		for _, chunk := range chunkStringByRunes(argsJSON, 40) {
+		fmt.Fprintf(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"tool_use\",\"id\":%q,\"name\":%q,\"input\":{}}}\n\n", blockIdx, toolID, tc.Name)
+		for _, chunk := range chunkStringByRunes(tc.Args, 40) {
 			chunkBytes, _ := json.Marshal(chunk)
 			fmt.Fprintf(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":%d,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":%s}}\n\n", blockIdx, string(chunkBytes))
 			flush()
 		}
 		fmt.Fprintf(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":%d}\n\n", blockIdx)
 		flush()
+		blockIdx++
 	}
 
 	// 4. message_delta + message_stop
@@ -319,6 +413,7 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 	fmt.Fprintf(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 	flush()
 }
+
 
 // writeSseBody is a helper used by forwardRequest when it needs to emit a
 // spoofed SSE body: sets headers, writes 200, then calls emitSpoofedAnthropicStream.
