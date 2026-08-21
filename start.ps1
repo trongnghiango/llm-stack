@@ -18,7 +18,7 @@ $NimAccounts = Join-Path $ConfigDir "nim_accounts.csv"
 $NimAccountsExample = Join-Path $ConfigDir "nim_accounts.csv.example"
 
 $LogsDir = Join-Path $ProjectRoot "data\logs"
-$DbDir = Join-Path $ProjectRoot "data\omniroute"
+$DbDir = Join-Path $ProjectRoot "data\9router"
 $DbPath = Join-Path $DbDir "storage.sqlite"
 $InitSql = Join-Path $ProjectRoot "data\init.sql"
 
@@ -68,7 +68,7 @@ if (-not (Test-Path $CfAccounts) -and (Test-Path $CfAccountsExample)) {
     Copy-Item $CfAccountsExample $CfAccounts
 }
 
-# 4. Tự động khởi tạo nim_accounts.csv cho omniroute nếu chưa có
+# 4. Tự động khởi tạo nim_accounts.csv cho 9router nếu chưa có
 if (-not (Test-Path $NimAccounts) -and (Test-Path $NimAccountsExample)) {
     Write-Host "ℹ️ Tu dong tao config/nim_accounts.csv tu ban vi du..." -ForegroundColor Cyan
     Copy-Item $NimAccountsExample $NimAccounts
@@ -80,8 +80,8 @@ $DirsToCreate = @(
     (Join-Path $ProjectRoot "data\redis"),
     $LogsDir,
     (Join-Path $LogsDir "claude-proxy"),
-    (Join-Path $LogsDir "omniroute"),
-    (Join-Path $LogsDir "omniroute-calls")
+    (Join-Path $LogsDir "9router"),
+    (Join-Path $LogsDir "9router-calls")
 )
 
 foreach ($dir in $DirsToCreate) {
@@ -99,7 +99,7 @@ docker compose up -d --build
 
 # 7. Thực hiện Seeding nếu DB được tạo mới
 if (-not $DbExists) {
-    Write-Host "⏳ Cho omniroute khoi chay va tao cau truc DB (5 giay)..." -ForegroundColor Yellow
+    Write-Host "⏳ Cho 9router khoi chay va tao cau truc DB (5 giay)..." -ForegroundColor Yellow
     Start-Sleep -Seconds 5
 
     if (Test-Path $DbPath) {
@@ -127,8 +127,8 @@ except Exception as e:
 "@
             & $pythonCmd.Source -c $pyScript
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "🔄 Khoi dong lai omniroute de cap nhat cau hinh..." -ForegroundColor Green
-                docker compose restart omniroute
+                Write-Host "🔄 Khoi dong lai 9router de cap nhat cau hinh..." -ForegroundColor Green
+                docker compose restart 9router
             }
         }
         else {

@@ -22,12 +22,12 @@ function Show-Usage {
     Write-Host "Cac lenh ho tro:"
     Write-Host "  start             Khoi dong toan bo dich vu (tu dong tao .env & seed DB neu moi)" -ForegroundColor Green
     Write-Host "  stop              Dung va don dep cac containers" -ForegroundColor Yellow
-    Write-Host "  restart [service] Khoi dong lai toan bo hoac 1 dich vu (vi du: omniroute, cf-ai-proxy)" -ForegroundColor Green
+    Write-Host "  restart [service] Khoi dong lai toan bo hoac 1 dich vu (vi du: 9router, cf-ai-proxy)" -ForegroundColor Green
     Write-Host "  status            Xem trang thai hoat dong cua cac containers" -ForegroundColor Cyan
     Write-Host "  logs [service]    Xem logs truc tiep (tail logs) cua toan bo hoac 1 dich vu" -ForegroundColor Cyan
     Write-Host "  sync-nim          Dong bo tai khoan NVIDIA NIM tu config/nim_accounts.csv" -ForegroundColor Green
     Write-Host "  flush             Xoa sach bo nho dem (cache) trong Redis" -ForegroundColor Yellow
-    Write-Host "  update [service]  Cap nhat image moi nhat cho dich vu (mac dinh: omniroute)" -ForegroundColor Cyan
+    Write-Host "  update [service]  Cap nhat image moi nhat cho dich vu (mac dinh: 9router)" -ForegroundColor Cyan
     Write-Host "  help              Hien thi huong dan nay`n"
     Write-Host "Vi du:"
     Write-Host "  .\stack.ps1 start"
@@ -77,8 +77,8 @@ switch ($Command.ToLower()) {
                 & $pythonCmd.Source $syncScript
                 Write-Host "🧹 Dang xoa sach cache cu trong Redis..." -ForegroundColor Cyan
                 docker exec llm-redis redis-cli flushall 2>$null | Out-Null
-                Write-Host "🔄 Khoi dong lai omniroute de nap cau hinh moi..." -ForegroundColor Green
-                docker compose restart omniroute
+                Write-Host "🔄 Khoi dong lai 9router de nap cau hinh moi..." -ForegroundColor Green
+                docker compose restart 9router
                 Write-Host "🎉 Hoan tat! NVIDIA NIM da duoc dong bo va san sang hoat dong." -ForegroundColor Green
             } else {
                 Write-Host "❌ Loi: Can cai dat Python de chay script dong bo." -ForegroundColor Red
@@ -93,7 +93,7 @@ switch ($Command.ToLower()) {
         Write-Host "✅ Da xoa sach cache Redis!" -ForegroundColor Green
     }
     "update" {
-        $svc = if ($Option) { $Option } else { "omniroute" }
+        $svc = if ($Option) { $Option } else { "9router" }
         Write-Host "📦 Bat dau cap nhat dich vu: $svc..." -ForegroundColor Cyan
         docker compose pull $svc
         docker compose up -d --no-deps $svc

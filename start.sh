@@ -18,7 +18,7 @@ NIM_ACCOUNTS_EXAMPLE="$CONFIG_DIR/nim_accounts.csv.example"
 
 # Centralized log directories
 LOGS_DIR="$PROJECT_ROOT/data/logs"
-DB_DIR="$PROJECT_ROOT/data/omniroute"
+DB_DIR="$PROJECT_ROOT/data/9router"
 DB_PATH="$DB_DIR/storage.sqlite"
 INIT_SQL="$PROJECT_ROOT/data/init.sql"
 
@@ -74,7 +74,7 @@ if [ ! -f "$CF_ACCOUNTS" ] && [ -f "$CF_ACCOUNTS_EXAMPLE" ]; then
   cp "$CF_ACCOUNTS_EXAMPLE" "$CF_ACCOUNTS"
 fi
 
-# 4. Tự động khởi tạo nim_accounts.csv cho omniroute nếu chưa có
+# 4. Tự động khởi tạo nim_accounts.csv cho 9router nếu chưa có
 if [ ! -f "$NIM_ACCOUNTS" ] && [ -f "$NIM_ACCOUNTS_EXAMPLE" ]; then
   echo "ℹ️ Tự động tạo config/nim_accounts.csv từ bản ví dụ..."
   cp "$NIM_ACCOUNTS_EXAMPLE" "$NIM_ACCOUNTS"
@@ -90,8 +90,8 @@ mkdir -p "$DB_DIR"
 mkdir -p "$PROJECT_ROOT/data/redis"
 mkdir -p "$LOGS_DIR"
 mkdir -p "$LOGS_DIR/claude-proxy"
-mkdir -p "$LOGS_DIR/omniroute"
-mkdir -p "$LOGS_DIR/omniroute-calls"
+mkdir -p "$LOGS_DIR/9router"
+mkdir -p "$LOGS_DIR/9router-calls"
 
 # Sét quyền 777 cho thư mục data chứa db và logs để tránh lỗi phân quyền docker container
 chmod -R 777 "$PROJECT_ROOT/data" || true
@@ -109,7 +109,7 @@ docker compose up -d --build
 
 # 6. Thực hiện Seeding nếu DB được tạo mới
 if [ "$DB_EXISTS" = "false" ]; then
-  echo "⏳ Chờ omniroute khởi chạy và tạo cấu trúc DB (5 giây)..."
+  echo "⏳ Chờ 9router khởi chạy và tạo cấu trúc DB (5 giây)..."
   sleep 5
 
   if [ -f "$DB_PATH" ]; then
@@ -135,20 +135,20 @@ except Exception as e:
     sys.exit(1)
 "
       if [ $? -eq 0 ]; then
-        echo "🔄 Khởi động lại omniroute để cập nhật cấu hình..."
-        docker compose restart omniroute
+        echo "🔄 Khởi động lại 9router để cập nhật cấu hình..."
+        docker compose restart 9router
       fi
     elif command -v sqlite3 >/dev/null 2>&1; then
       sqlite3 "$DB_PATH" < "$INIT_SQL"
       echo "✅ [Init] Nạp dữ liệu seed thành công bằng CLI sqlite3!"
 
-      echo "🔄 Restarting omniroute để cập nhật cấu hình..."
-      docker compose restart omniroute
+      echo "🔄 Restarting 9router để cập nhật cấu hình..."
+      docker compose restart 9router
     else
       echo "❌ [Init] Lỗi: Cần 'python3' hoặc 'sqlite3' trên máy Host để tự động nạp seed. Vui lòng tự seed bằng: sqlite3 $DB_PATH < $INIT_SQL"
     fi
   else
-    echo "⚠️ [Init] Không tìm thấy storage.sqlite được tạo ra bởi omniroute. Bỏ qua bước seed."
+    echo "⚠️ [Init] Không tìm thấy storage.sqlite được tạo ra bởi 9router. Bỏ qua bước seed."
   fi
 else
   echo "ℹ [Init] SQLite DB đã tồn tại. Bỏ qua bước seed dữ liệu."
