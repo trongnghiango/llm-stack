@@ -48,11 +48,10 @@ Resolution flow: static route → cache lookup → LLM classifier call or keywor
 
 | Role | Physical Model |
 |------|---------------|
-| `swe.architect` | `ka.reason` |
-| `swe.engineer` | `ka.base` |
-| `swe.subagent` | `ka.base` |
-| `swe.utility` | Dynamic (doc keyword → ka.docs, else ka.simple) |
-| `swe.knowledge` | `ka.docs` |
+| `claude-opus-5` | `ka.reason` (Architect) |
+| `claude-sonnet-5` | `ka.base` (Engineer / Subagent) |
+| `claude-haiku-4-5-20251001` | Dynamic (doc keyword → ka.docs, else ka.simple) |
+| `claude-fable-5` | `ka.docs` (Knowledge) |
 
 Client‑side mapping (`config/model_mappings.json`) maps conceptual model names to Claude API model IDs.
 

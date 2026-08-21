@@ -35,7 +35,7 @@ Controlled by `use_llm_router` in `config.json` (overridable via `USE_LLM_ROUTER
 
 ### FSM resolution flow (`internal/router/routing_fsm.go`)
 
-1. **Static route** — non‑`swe.*` models pass through unchanged, `swe.*` models without dynamic rules resolve to their `target_model` directly.
+1. **Static route** — non‑`claude-*` models pass through unchanged, `claude-*` models without dynamic rules resolve to their `target_model` directly.
 2. **Cache lookup** — if the same `model:prompt` pair was resolved before, return cached target.
 3. **LLM call** (if LLM router enabled) — classifier returns `MINIMAX`, `DEEPSEEK`, or a custom decision → mapped through `decision_map` → `builtinDecisionMap`.
 4. **Keyword match** — scans `semantic_rules[model].keywords` for prompt substring matches.
@@ -43,7 +43,7 @@ Controlled by `use_llm_router` in `config.json` (overridable via `USE_LLM_ROUTER
 
 ### Two‑layer model mapping
 
-- **Layer 1 (proxy, `config.json`)**: abstract roles (`swe.architect`, `swe.engineer`, `swe.utility`, `swe.knowledge`) → physical upstream model names (e.g. `nvidia/openai/gpt-oss-120b`, `ds/deepseek-v4-flash`).
+- **Layer 1 (proxy, `config.json`)**: abstract roles (`claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5-20251001`, `claude-fable-5`) → internal routing nodes (`ka.reason`, `ka.base`, etc.) → physical upstream model names (e.g. `nvidia/openai/gpt-oss-120b`, `ds/deepseek-v4-flash`).
 - **Layer 2 (client, `config/model_mappings.json`)**: framework conceptual models (`GPT-OSS-120B`, `GLM-5.2`, `DeepSeek`, `MiniMax`) → Claude API model IDs.
 
 ### Logging

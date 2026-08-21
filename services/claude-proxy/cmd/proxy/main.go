@@ -112,11 +112,11 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Warn on unrecognised swe.* models.
-	if strings.HasPrefix(originalModel, "swe.") {
+	// Warn on unrecognised proxy-configured models.
+	if strings.HasPrefix(originalModel, "claude-") || strings.HasPrefix(originalModel, "swe.") {
 		st := router.GetState()
 		if _, known := st.SemanticRuleMap[originalModel]; !known {
-			logger.Errorf("[Security] Unrecognised swe model: %s", originalModel)
+			logger.Errorf("[Security] Unrecognised routed model: %s", originalModel)
 			metrics.InvalidModelTotal.Inc()
 		}
 	}

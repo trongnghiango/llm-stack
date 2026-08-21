@@ -3,7 +3,7 @@
 #
 # Luồng:
 #   Claude Code (host:20129)
-#     → claude-proxy  (20129)  [model rewrite: swe.* → ka.*]
+#     → claude-proxy  (20129)  [model rewrite: claude-* → ka.*]
 #     → 9router       (20128)  [LLM router / load balancer]
 #     → cf-ai-proxy   (20127)  [Anthropic ↔ Cloudflare CF format]
 #     → Cloudflare Workers AI

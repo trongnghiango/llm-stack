@@ -12,10 +12,9 @@ Hệ thống kết hợp **claude-proxy** (Anthropic rewriter), **OmniRoute** (l
 * **Bảo mật tuyệt đối:** Tự động loại trừ 100% secret, token, database khỏi Git tracking.
 * **Đa nền tảng (Cross-Platform):** Chạy 1-click mượt mà trên cả **Windows** (PowerShell / WSL2), **macOS** (Apple Silicon / Intel) và **Linux**.
 * **Định tuyến thông minh theo nhu cầu (Multi-Tier):**
-  * `swe.architect` $\rightarrow$ **`ka.reason`** (GPT-OSS 120B / Reasoning Model).
-  * `swe.engineer` $\rightarrow$ **`ka.base`** (Gemini 2.5 Flash / Fast Coding Agent).
-  * `swe.subagent` $\rightarrow$ **`ka.base`** (Subagents song song).
-  * `swe.utility` / `swe.knowledge` $\rightarrow$ **`ka.docs`** (Xử lý tài liệu context 1 Triệu tokens).
+  * `claude-opus-5` (Architect) $\rightarrow$ **`ka.reason`** (GPT-OSS 120B / Reasoning Model).
+  * `claude-sonnet-5` (Engineer/Subagent) $\rightarrow$ **`ka.base`** (Gemini 2.5 Flash / Fast Coding Agent).
+  * `claude-haiku-4-5` / `claude-fable-5` (Utility/Knowledge) $\rightarrow$ **`ka.docs`** (Xử lý tài liệu context 1 Triệu tokens).
 
 ---
 
