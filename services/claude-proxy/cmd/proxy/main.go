@@ -180,7 +180,7 @@ func extractPromptText(messages []Message) string {
 		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
 			for _, b := range blocks {
 				if b.Type == "text" {
-					sb.WriteString(" " + cleanPromptForRouting(b.Text))
+				sb.WriteString(" " + cleanPromptForRouting(b.Text))
 				}
 			}
 		}
@@ -223,6 +223,7 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte, isSp
 		http.Error(w, "Unable to establish connection to upstream", http.StatusBadGateway)
 		return
 	}
+	// Bắt buộc luôn xả và đóng stream
 	defer resp.Body.Close()
 
 	isStream := writeUpstreamResponseHeaders(w, resp)
@@ -267,7 +268,8 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte, isSp
 	if isStream {
 		setSseHeaders(w)
 		w.WriteHeader(resp.StatusCode)
-		forwardStreamWithValidation(w, resp)
+		// UPDATED: Now passes `r` to enable context listening
+		forwardStreamWithValidation(w, r, resp)
 		return
 	}
 

@@ -273,11 +273,11 @@ func TestLogPayload(t *testing.T) {
 	}
 
 	// Case 4: Redaction Enabled
-	origRedact := redactSensitivePayloads
+	origRedact := redactSensitivePayloads.Load()
 	defer func() {
-		redactSensitivePayloads = origRedact
+		redactSensitivePayloads.Store(origRedact)
 	}()
-	redactSensitivePayloads = true
+	redactSensitivePayloads.Store(true)
 	LogPayload("req4", []byte(`{"api_key":"sk-999","content":"hello"}`))
 	filePath4 := filepath.Join(tempDir, "req-req4.json")
 	for i := 0; i < 20; i++ {
@@ -353,15 +353,15 @@ func TestRedactPayload(t *testing.T) {
 
 func TestCleanOldPayloadLogs(t *testing.T) {
 	origDir := payloadsDir
-	origDays := payloadLogRetentionDays
+	origDays := payloadLogRetentionDays.Load()
 	defer func() {
 		payloadsDir = origDir
-		payloadLogRetentionDays = origDays
+		payloadLogRetentionDays.Store(origDays)
 	}()
 
 	tempDir := t.TempDir()
 	payloadsDir = tempDir
-	payloadLogRetentionDays = 1 // 1 day retention
+	payloadLogRetentionDays.Store(1) // 1 day retention
 
 	// Create some mock log files
 	now := time.Now()

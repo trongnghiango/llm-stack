@@ -127,7 +127,7 @@ func setSseHeaders(w http.ResponseWriter) {
 
 // forwardStreamWithValidation pipes an SSE response from upstream to the client,
 // skipping (or terminating on) malformed JSON chunks depending on STRICT_SCHEMA_VALIDATION.
-func forwardStreamWithValidation(w http.ResponseWriter, resp *http.Response) {
+func forwardStreamWithValidation(w http.ResponseWriter, r *http.Request, resp *http.Response) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		_, _ = io.Copy(w, resp.Body)
@@ -139,8 +139,16 @@ func forwardStreamWithValidation(w http.ResponseWriter, resp *http.Response) {
 	scanner.Buffer(buf, 1024*1024)
 
 	strictMode := os.Getenv("STRICT_SCHEMA_VALIDATION") == "true"
+	ctx := r.Context()
 
 	for scanner.Scan() {
+		// Check if the client disconnected (e.g. Claude Code closed or user pressed Ctrl+C)
+		if err := ctx.Err(); err != nil {
+			logger.Warnf("[Stream] Client disconnected mid-stream: %v", err)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			return
+		}
+
 		line := scanner.Bytes()
 		shouldForward := true
 
@@ -157,18 +165,28 @@ func forwardStreamWithValidation(w http.ResponseWriter, resp *http.Response) {
 					logger.Errorf("[Stream] STRICT: invalid JSON chunk, closing: %s", chunk)
 					w.Write([]byte("event: error\ndata: {\"error\":{\"type\":\"stream_parse_error\",\"message\":\"Strict mode terminated connection due to invalid schema structure from Upstream.\"}}\n\n"))
 					flusher.Flush()
+					_, _ = io.Copy(io.Discard, resp.Body) // Drain body to allow connection reuse
 					return
 				}
 
 				logger.Warnf("[Stream] Skipping malformed JSON chunk: %s", chunk)
-				w.Write([]byte("event: ping\ndata: {\"warning\":\"malformed_json_skipped_gracefully\"}\n\n"))
+				if _, err := w.Write([]byte("event: ping\ndata: {\"warning\":\"malformed_json_skipped_gracefully\"}\n\n")); err != nil {
+					_, _ = io.Copy(io.Discard, resp.Body)
+					return
+				}
 				shouldForward = false
 			}
 		}
 
 		if shouldForward {
-			w.Write(line)
-			w.Write([]byte("\n"))
+			if _, err := w.Write(line); err != nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				return
+			}
+			if _, err := w.Write([]byte("\n")); err != nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				return
+			}
 		}
 		flusher.Flush()
 	}
@@ -236,14 +254,29 @@ func writeUpstreamResponseHeaders(w http.ResponseWriter, resp *http.Response) (i
 	return
 }
 
-// readBodyOrError reads the full response body, writing a 502 error to w on failure.
+// readBodyOrError reads the full response body with a max size limit to prevent OOM,
+// writing a 502 error to w on failure.
 func readBodyOrError(w http.ResponseWriter, resp *http.Response, label string) ([]byte, bool) {
-	b, err := io.ReadAll(resp.Body)
+	// Use a 15MB limit when buffering responses in memory for spoofing/fake-streaming.
+	const maxMemoryResponseBytes = 15 << 20
+	limitedReader := io.LimitReader(resp.Body, maxMemoryResponseBytes)
+
+	b, err := io.ReadAll(limitedReader)
 	if err != nil {
 		logger.Errorf("[%s] Failed to read upstream body: %v", label, err)
 		http.Error(w, "Failed to read upstream response", http.StatusBadGateway)
+		_, _ = io.Copy(io.Discard, resp.Body) // Ensure connection is drained
 		return nil, false
 	}
+
+	// Check if we hit the limit without reaching EOF
+	if int64(len(b)) >= maxMemoryResponseBytes {
+		logger.Errorf("[%s] Upstream payload exceeds %d bytes limit, dropping to prevent OOM.", label, maxMemoryResponseBytes)
+		http.Error(w, "Upstream response payload too large", http.StatusBadGateway)
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil, false
+	}
+
 	return b, true
 }
 

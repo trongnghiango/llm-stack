@@ -1,0 +1,16 @@
+# Tự động chuẩn hóa line endings
+* text=auto eol=lf
+
+# Khai báo cụ thể các loại tệp
+*.go text eol=lf
+*.sh text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+
+# Tệp Windows
+*.ps1 text eol=crlf
+*.bat text eol=crlf
