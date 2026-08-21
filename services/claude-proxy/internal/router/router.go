@@ -42,13 +42,21 @@ func NewModelRouter(cfg config.Config) ModelRouter {
 func resolveRecursive(originalModel, prompt string, useLLM bool) string {
 	visited := make(map[string]bool)
 	currentModel := originalModel
-	for strings.HasPrefix(currentModel, "swe.") {
+
+	for {
 		if visited[currentModel] {
 			logger.Errorf("[Router] Cycle detected in recursive resolution: %s, falling back to %s", currentModel, originalModel)
 			return originalModel
 		}
 		visited[currentModel] = true
-		nextModel := resolveDynamic(currentModel, prompt, useLLM)
+
+		var nextModel string
+		if isDynamicModel(currentModel) {
+			nextModel = resolveDynamic(currentModel, prompt, useLLM)
+		} else {
+			nextModel = getStaticTarget(currentModel)
+		}
+
 		if nextModel == currentModel {
 			break
 		}

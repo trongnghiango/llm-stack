@@ -113,6 +113,76 @@ func extractTextFromJSON(bodyBytes []byte) string {
 	return string(bodyBytes)
 }
 
+// convertToAnthropicJSON converts an upstream OpenAI-format JSON response body
+// into a minimal Anthropic messages API JSON response. If the body is already
+// in Anthropic format (has a "type" field), it is returned as-is.
+func convertToAnthropicJSON(bodyBytes []byte) []byte {
+	var generic map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &generic); err != nil {
+		return bodyBytes
+	}
+
+	// Already Anthropic format
+	if _, isAnthropic := generic["type"]; isAnthropic {
+		return bodyBytes
+	}
+
+	// OpenAI format → convert
+	choices, hasChoices := generic["choices"].([]interface{})
+	if !hasChoices || len(choices) == 0 {
+		return bodyBytes
+	}
+
+	finishReason := "end_turn"
+	var text string
+
+	if choice, ok := choices[0].(map[string]interface{}); ok {
+		if fr, ok := choice["finish_reason"].(string); ok {
+			switch fr {
+			case "tool_calls":
+				finishReason = "tool_use"
+			case "length", "max_tokens":
+				finishReason = "max_tokens"
+			default:
+				finishReason = "end_turn"
+			}
+		}
+		if msg, ok := choice["message"].(map[string]interface{}); ok {
+			if c, ok := msg["content"].(string); ok {
+				text = c
+			}
+		}
+	}
+
+	modelID, _ := generic["model"].(string)
+	msgID, _ := generic["id"].(string)
+	if msgID == "" {
+		msgID = "msg_proxy"
+	}
+
+	anthropicResp := map[string]interface{}{
+		"id":           msgID,
+		"type":         "message",
+		"role":         "assistant",
+		"model":        modelID,
+		"stop_reason":  finishReason,
+		"stop_sequence": nil,
+		"content": []map[string]interface{}{
+			{"type": "text", "text": text},
+		},
+		"usage": map[string]interface{}{
+			"input_tokens":  0,
+			"output_tokens": 0,
+		},
+	}
+
+	out, err := json.Marshal(anthropicResp)
+	if err != nil {
+		return bodyBytes
+	}
+	return out
+}
+
 // ─────────────────────────────────────────────
 // SSE stream forwarding with JSON validation
 // ─────────────────────────────────────────────

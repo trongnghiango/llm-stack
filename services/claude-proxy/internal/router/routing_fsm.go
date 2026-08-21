@@ -23,12 +23,6 @@ const (
 )
 
 func resolveDynamic(originalModel, prompt string, useLLM bool) string {
-	if !isDynamicModel(originalModel) {
-		target := getStaticTarget(originalModel)
-		logger.Debugf("[Router] Static route model=%s -> %s", originalModel, target)
-		return target
-	}
-
 	cur := stateIdle
 	var resolvedModel string
 	cacheKey := originalModel + ":" + prompt
@@ -177,9 +171,6 @@ func resolveDynamic(originalModel, prompt string, useLLM bool) string {
 
 // isDynamicModel returns true if a model requires dynamic classifier routing.
 func isDynamicModel(model string) bool {
-	if model == "swe.utility" {
-		return true
-	}
 	st := GetState()
 	if rules, ok := st.SemanticRuleMap[model]; ok {
 		for _, rule := range rules {
@@ -205,9 +196,6 @@ func getStaticTarget(model string) string {
 				return rule.TargetModel
 			}
 		}
-	}
-	if model == "swe.utility" {
-		return "ka.simple"
 	}
 	return model
 }

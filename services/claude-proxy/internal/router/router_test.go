@@ -38,6 +38,22 @@ func mockRouterServer(decision string) *httptest.Server {
 
 // storeTestState populates globalState atomically for a router test.
 func storeTestState(cfg config.Config, sm map[string][]config.SemanticRule, dm map[string]string, ms map[string]config.ModelSetting) {
+	if sm == nil {
+		sm = make(map[string][]config.SemanticRule)
+	}
+	if len(sm["swe.utility"]) == 0 {
+		sm["swe.utility"] = []config.SemanticRule{
+			{TriggerModel: "swe.utility", Keywords: []string{"test"}, TargetModel: "ka.simple"},
+			{TriggerModel: "swe.utility", TargetModel: "ka.simple"},
+		}
+	}
+	if dm == nil {
+		dm = map[string]string{
+			"MINIMAX":  "ka.docs",
+			"FALLBACK": "ka.simple",
+			"DEEPSEEK": "ka.simple",
+		}
+	}
 	router := NewModelRouter(cfg)
 	globalState.Store(&RouterState{
 		Config:           cfg,
@@ -299,7 +315,7 @@ func TestGetStaticTarget(t *testing.T) {
 		want  string
 	}{
 		{"swe.architect", "gpt-oss"},
-		{"swe.utility", "ka.simple"},
+		{"swe.utility", "swe.utility"},
 		{"unknown.model", "unknown.model"},
 	}
 

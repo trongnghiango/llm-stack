@@ -192,46 +192,17 @@ type toolCall struct {
 	Args string // JSON string
 }
 
-// xmlTagRe strips any XML-like <tag>...</tag> or <tag>... wrappers from text so
-// they never leak as raw characters into the streamed response.
-var xmlTagRe = regexp.MustCompile(`(?s)<(?:tools|tool_call|tool)>.*?(?:</(?:tools|tool_call|tool)>|$)`)
 
-// parseToolFromText inspects text for one or more tool-calls in any supported
-// format and returns:
-//
-//	 textToStream  – text before the first tool call (safe to stream as text_delta)
-//	 calls         – ordered list of detected tool calls
-//
-// Detection order (first match wins per call):
-//  1. XML tags: <tools>, <tool_call>, <tool>
-//  2. Special LLM tokens: <|message|>...<|call|>
-//  3. Markdown fenced JSON: ```json { "name": ... } ```
-//  4. Raw JSON object containing "name" + "arguments"/"input"
-func parseToolFromText(text string) (textToStream, toolName, argsJSON string, hasTool bool) {
-	textToStream = text
-	argsJSON = "{}"
-
-	calls, prefixText := extractAllToolCalls(text)
-	if len(calls) == 0 {
-		return
-	}
-
-	hasTool = true
-	toolName = calls[0].Name
-	argsJSON = calls[0].Args
-	textToStream = strings.TrimSpace(prefixText)
-	return
-}
 
 // extractAllToolCalls finds every tool call embedded in text and returns them
 // in order along with any plain text that precedes the first call.
-func extractAllToolCalls(text string) (calls []toolCall, prefixText string) {
+func extractAllToolCalls(text string, requestedTools []AnthropicTool) (calls []toolCall, prefixText string) {
 	prefixText = text
 	working := text
 	firstPrefix := true
 
 	for {
-		call, pre, rest, found := extractOneToolCall(working)
+		call, pre, rest, found := extractOneToolCall(working, requestedTools)
 		if !found {
 			break
 		}
@@ -250,11 +221,11 @@ func extractAllToolCalls(text string) (calls []toolCall, prefixText string) {
 
 // extractOneToolCall finds the first tool call in text and returns:
 //
-//	 call       – the extracted tool
-//	 prefixText – text before the tool call
-//	 remainder  – text after the tool call (for chaining)
-//	 found      – whether a tool call was detected
-func extractOneToolCall(text string) (call toolCall, prefixText, remainder string, found bool) {
+//	call       – the extracted tool
+//	prefixText – text before the tool call
+//	remainder  – text after the tool call (for chaining)
+//	found      – whether a tool call was detected
+func extractOneToolCall(text string, requestedTools []AnthropicTool) (call toolCall, prefixText, remainder string, found bool) {
 	mkArgs := func(args interface{}) string {
 		if args == nil {
 			return "{}"
@@ -271,12 +242,20 @@ func extractOneToolCall(text string) (call toolCall, prefixText, remainder strin
 		}
 	}
 
-	// 1. XML tag pairs — try each tag family
-	for _, pair := range [][2]string{
+	// 1. Dynamic XML tag pairs based on requested tools
+	tagPairs := [][2]string{
 		{"<tools>", "</tools>"},
 		{"<tool_call>", "</tool_call>"},
 		{"<tool>", "</tool>"},
-	} {
+	}
+	for _, t := range requestedTools {
+		tagPairs = append(tagPairs, [2]string{fmt.Sprintf("<%s>", t.Name), fmt.Sprintf("</%s>", t.Name)})
+		if t.Name == "Bash" {
+			tagPairs = append(tagPairs, [2]string{"<run_command>", "</run_command>"})
+		}
+	}
+
+	for _, pair := range tagPairs {
 		startTag, endTag := pair[0], pair[1]
 		si := strings.Index(text, startTag)
 		if si < 0 {
@@ -288,19 +267,30 @@ func extractOneToolCall(text string) (call toolCall, prefixText, remainder strin
 			raw = strings.TrimSpace(text[si+len(startTag) : ei])
 			after = text[ei+len(endTag):]
 		} else {
-			// No closing tag — consume to end but still mark as found
-			// to prevent raw XML leaking as text.
 			raw = strings.TrimSpace(text[si+len(startTag):])
 			after = ""
 		}
 		name, args, ok := parseToolJSON(raw)
 		if !ok {
-			// JSON parse failed but tag was found — extract name via regex
-			// and still suppress the raw XML from the output.
 			if m := nameRe.FindStringSubmatch(raw); len(m) >= 2 {
+				// raw contains JSON with a name field — extract it
 				name = m[1]
 				ok = true
-				args = raw // pass raw string; mkArgs will use it as-is
+				args = raw
+			} else {
+				// raw is plain text — derive tool name from tag and map via schema
+				toolName := strings.Trim(startTag, "<>")
+				if toolName == "run_command" {
+					toolName = "Bash"
+				}
+				for _, t := range requestedTools {
+					if t.Name == toolName {
+						name = t.Name
+						ok = true
+						args = mapRawTextToSchema(raw, t.InputSchema)
+						break
+					}
+				}
 			}
 		}
 		if ok && name != "" {
@@ -322,6 +312,34 @@ func extractOneToolCall(text string) (call toolCall, prefixText, remainder strin
 				prefix = prefix[:si]
 			}
 			return toolCall{Name: name, Args: mkArgs(args)}, prefix, after, true
+		}
+	}
+
+	// 2.5. Paired <tool_name> + <tool_arguments> tags (common hallucination format)
+	if ni := strings.Index(text, "<tool_name>"); ni >= 0 {
+		niEnd := strings.Index(text, "</tool_name>")
+		if niEnd > ni {
+			toolName := strings.TrimSpace(text[ni+len("<tool_name>") : niEnd])
+			rest := text[niEnd+len("</tool_name>"):]
+			rawArgs := "{}"
+			after := rest
+			if ai := strings.Index(rest, "<tool_arguments>"); ai >= 0 {
+				aiEnd := strings.Index(rest, "</tool_arguments>")
+				if aiEnd > ai {
+					rawArgs = strings.TrimSpace(rest[ai+len("<tool_arguments>") : aiEnd])
+					after = rest[aiEnd+len("</tool_arguments>"):]
+				}
+			}
+			if toolName != "" {
+				// Map args through the tool's schema if raw text isn't JSON
+				for _, t := range requestedTools {
+					if t.Name == toolName {
+						rawArgs = mapRawTextToSchema(rawArgs, t.InputSchema)
+						break
+					}
+				}
+				return toolCall{Name: toolName, Args: mkArgs(rawArgs)}, text[:ni], after, true
+			}
 		}
 	}
 
@@ -351,7 +369,7 @@ func extractOneToolCall(text string) (call toolCall, prefixText, remainder strin
 // emitSpoofedAnthropicStream converts a plain-text model response (which may
 // contain one or more tool-calls in any supported format) into a well-formed
 // Anthropic SSE stream and writes it to w.
-func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
+func emitSpoofedAnthropicStream(w http.ResponseWriter, text string, requestedTools []AnthropicTool) {
 	flusher, _ := w.(http.Flusher)
 	flush := func() {
 		if flusher != nil {
@@ -359,7 +377,7 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 		}
 	}
 
-	calls, prefixText := extractAllToolCalls(text)
+	calls, prefixText := extractAllToolCalls(text, requestedTools)
 	hasTool := len(calls) > 0
 	if hasTool {
 		for _, c := range calls {
@@ -413,11 +431,66 @@ func emitSpoofedAnthropicStream(w http.ResponseWriter, text string) {
 	flush()
 }
 
-
 // writeSseBody is a helper used by forwardRequest when it needs to emit a
 // spoofed SSE body: sets headers, writes 200, then calls emitSpoofedAnthropicStream.
-func writeSseBody(w http.ResponseWriter, fullText string) {
+func writeSseBody(w http.ResponseWriter, fullText string, requestedTools []AnthropicTool) {
 	setSseHeaders(w)
 	w.WriteHeader(http.StatusOK)
-	emitSpoofedAnthropicStream(w, fullText)
+	emitSpoofedAnthropicStream(w, fullText, requestedTools)
+}
+
+// writeJsonBody is used when the client requested a JSON response instead of a stream
+func writeJsonBody(w http.ResponseWriter, fullText string, requestedTools []AnthropicTool) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	calls, prefixText := extractAllToolCalls(fullText, requestedTools)
+	hasTool := len(calls) > 0
+
+	content := []map[string]interface{}{}
+	textToStream := strings.TrimSpace(prefixText)
+	if textToStream != "" || !hasTool {
+		content = append(content, map[string]interface{}{
+			"type": "text",
+			"text": textToStream,
+		})
+	}
+	for _, tc := range calls {
+		toolID := fmt.Sprintf("toolu_spoof_%d", time.Now().UnixNano())
+		
+		var input map[string]interface{}
+		if err := json.Unmarshal([]byte(tc.Args), &input); err != nil {
+			input = map[string]interface{}{}
+		}
+		
+		content = append(content, map[string]interface{}{
+			"type":  "tool_use",
+			"id":    toolID,
+			"name":  tc.Name,
+			"input": input,
+		})
+	}
+
+	stopReason := "end_turn"
+	if hasTool {
+		stopReason = "tool_use"
+	}
+	
+	msgID := fmt.Sprintf("msg_spoof_%d", time.Now().UnixNano())
+
+	resp := map[string]interface{}{
+		"id":            msgID,
+		"type":          "message",
+		"role":          "assistant",
+		"model":         "claude-3-7-sonnet-20250219",
+		"stop_reason":   stopReason,
+		"stop_sequence": nil,
+		"usage": map[string]interface{}{
+			"input_tokens":  0,
+			"output_tokens": 0,
+		},
+		"content": content,
+	}
+	
+	json.NewEncoder(w).Encode(resp)
 }

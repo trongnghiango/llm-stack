@@ -27,6 +27,13 @@ type Message struct {
 	Content json.RawMessage `json:"content"`
 }
 
+// AnthropicTool represents a tool definition requested by the client.
+type AnthropicTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema"`
+}
+
 // AnthropicRequest is the subset of request fields the proxy needs to inspect.
 type AnthropicRequest struct {
 	Model      string          `json:"model"`
@@ -38,20 +45,80 @@ type AnthropicRequest struct {
 }
 
 // ─────────────────────────────────────────────
+// Schema-driven argument mapping
+// ─────────────────────────────────────────────
+
+// toolInputSchema mirrors the Anthropic JSON Schema for a tool's input_schema field.
+type toolInputSchema struct {
+	Type       string                     `json:"type"`
+	Properties map[string]toolSchemaProp  `json:"properties"`
+	Required   []string                   `json:"required"`
+}
+
+// toolSchemaProp represents a single property entry in an input_schema.
+type toolSchemaProp struct {
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+}
+
+// mapRawTextToSchema tries to map raw model output into a proper JSON argument
+// object using the tool's input_schema. The strategy is:
+//  1. If raw is already valid JSON → return as-is (model did the right thing).
+//  2. Otherwise, find the first required string property in the schema and wrap
+//     the raw text into {"<first_required_string_prop>": "<raw>"}.
+//  3. If no schema or no matching property is found → return "{}".
+func mapRawTextToSchema(raw string, schema json.RawMessage) string {
+	raw = strings.TrimSpace(raw)
+
+	// 1. Already valid JSON — use it directly.
+	if json.Valid([]byte(raw)) && (strings.HasPrefix(raw, "{") || strings.HasPrefix(raw, "[")) {
+		return raw
+	}
+
+	// 2. Parse the input_schema.
+	if len(schema) == 0 {
+		return "{}"
+	}
+	var s toolInputSchema
+	if err := json.Unmarshal(schema, &s); err != nil || len(s.Properties) == 0 {
+		return "{}"
+	}
+
+	// Find first required string property.
+	for _, reqField := range s.Required {
+		if prop, ok := s.Properties[reqField]; ok && prop.Type == "string" {
+			b, _ := json.Marshal(map[string]string{reqField: raw})
+			return string(b)
+		}
+	}
+
+	// Fall back to first string property in iteration order (map is random but
+	// acceptable as a last resort).
+	for field, prop := range s.Properties {
+		if prop.Type == "string" {
+			b, _ := json.Marshal(map[string]string{field: raw})
+			return string(b)
+		}
+	}
+
+	return "{}"
+}
+
+
+// ─────────────────────────────────────────────
 // Tool-spoofing system prompt
 // ─────────────────────────────────────────────
 
 const toolSpoofSystemInstruction = "[CRITICAL SYSTEM INSTRUCTION FOR TOOL USE]\n" +
 	"You are an AI assistant equipped with specific tools.\n" +
-	"When you need to call a tool, output ONLY a single XML block formatted exactly like this:\n" +
-	"<tools>{\"name\": \"exact_tool_name\", \"arguments\": {\"param\": \"value\"}}</tools>\n" +
+	"When you need to call a tool, you can output a single XML block using the EXACT tool name as the tag (e.g., `<Bash>{\"command\": \"ls\"}</Bash>`) OR use the standard format `<tools>{\"name\": \"exact_tool_name\", \"arguments\": {\"param\": \"value\"}}</tools>`.\n" +
 	"Do not write any explanation, markdown, or text before or after the XML block when calling a tool.\n" +
 	"When you receive a [Tool Result] in the conversation history, the tool has already been executed. " +
 	"Use the result to continue or finish answering the user in plain text without repeating the tool call."
 
 // buildSpoofedSystemPrompt merges existing system content with tool schemas and
 // the XML-tool-call instruction so OSS models know how to emit tool calls.
-func buildSpoofedSystemPrompt(rawSystem json.RawMessage, rawTools json.RawMessage) string {
+func buildSpoofedSystemPrompt(rawSystem json.RawMessage, tools []AnthropicTool) string {
 	var systemStr string
 
 	if len(rawSystem) > 0 {
@@ -76,7 +143,7 @@ func buildSpoofedSystemPrompt(rawSystem json.RawMessage, rawTools json.RawMessag
 		systemStr = toolSpoofSystemInstruction
 	}
 
-	toolsBytes, _ := json.Marshal(rawTools)
+	toolsBytes, _ := json.Marshal(tools)
 	systemStr += "\n\nAVAILABLE TOOLS:\n" + string(toolsBytes)
 	return systemStr
 }
