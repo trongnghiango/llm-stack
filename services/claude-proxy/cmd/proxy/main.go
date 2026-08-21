@@ -18,8 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"claude-proxy/internal/config"
 	"claude-proxy/internal/logger"
 	"claude-proxy/internal/metrics"
@@ -59,11 +57,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Expose Prometheus metrics under /debug/metrics (bypass normal routing).
-	if r.URL.Path == "/debug/metrics" {
-		promhttp.Handler().ServeHTTP(w, r)
-		return
-	}
+
 
 	// ── 1. Read and size-limit the request body ──────────────────────────────
 	maxBytes := defaultMaxPayload

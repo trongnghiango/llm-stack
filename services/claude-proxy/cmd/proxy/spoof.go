@@ -23,25 +23,24 @@ func sanitizeJSONString(s string) string {
 	inString := false
 	escaped := false
 
-	for i := 0; i < len(s); i++ {
-		c := s[i]
+	for _, r := range s {
 		if inString {
 			if escaped {
-				sb.WriteByte(c)
+				sb.WriteRune(r)
 				escaped = false
 				continue
 			}
-			if c == '\\' {
+			if r == '\\' {
 				escaped = true
-				sb.WriteByte(c)
+				sb.WriteRune(r)
 				continue
 			}
-			if c == '"' {
+			if r == '"' {
 				inString = false
-				sb.WriteByte(c)
+				sb.WriteRune(r)
 				continue
 			}
-			switch c {
+			switch r {
 			case '\n':
 				sb.WriteString(`\n`)
 			case '\r':
@@ -49,13 +48,13 @@ func sanitizeJSONString(s string) string {
 			case '\t':
 				sb.WriteString(`\t`)
 			default:
-				sb.WriteByte(c)
+				sb.WriteRune(r)
 			}
 		} else {
-			if c == '"' {
+			if r == '"' {
 				inString = true
 			}
-			sb.WriteByte(c)
+			sb.WriteRune(r)
 		}
 	}
 	return sb.String()
@@ -93,8 +92,9 @@ func chunkStringByRunes(s string, chunkSize int) []string {
 
 // nameRe / argsRe are used as regex fallbacks when JSON.Unmarshal fails.
 var (
-	nameRe = regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`)
-	argsRe = regexp.MustCompile(`(?s)"(?:arguments|input|parameters)"\s*:\s*(\{.*?\}|\[.*?\])`)
+	nameRe  = regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`)
+	argsRe  = regexp.MustCompile(`(?s)"(?:arguments|input|parameters)"\s*:\s*(\{.*?\}|\[.*?\])`)
+	fenceRe = regexp.MustCompile("(?s)```(?:json)?\\s*(\\{[\\s\\S]*?\\})\\s*```")
 )
 
 // parseToolJSON attempts to extract (name, args, ok) from a raw JSON string
@@ -326,7 +326,6 @@ func extractOneToolCall(text string) (call toolCall, prefixText, remainder strin
 	}
 
 	// 3. Markdown fenced JSON
-	fenceRe := regexp.MustCompile("(?s)```(?:json)?\\s*(\\{[\\s\\S]*?\\})\\s*```")
 	for _, m := range fenceRe.FindAllStringSubmatchIndex(text, -1) {
 		raw := text[m[2]:m[3]]
 		if name, args, ok := parseToolJSON(raw); ok && name != "" {

@@ -143,8 +143,8 @@ var errorPatterns = [][]byte{[]byte("Error"), []byte("Exception"), []byte("[Lỗ
 var logInfoEnabled bool
 var logDebugEnabled bool
 var logPayloadsEnabled bool
-var redactSensitivePayloads bool
-var payloadLogRetentionDays int = 7
+var redactSensitivePayloads atomic.Bool
+var payloadLogRetentionDays atomic.Int32
 var payloadsDir = "logs/payloads"
 
 func initLogConfig() {
@@ -172,14 +172,15 @@ func initLogConfig() {
 	}
 	// Toggle payload redaction via REDACT_SENSITIVE_PAYLOADS env var (default enabled).
 	if v := os.Getenv("REDACT_SENSITIVE_PAYLOADS"); v == "0" || strings.EqualFold(v, "false") {
-		redactSensitivePayloads = false
+		redactSensitivePayloads.Store(false)
 	} else {
-		redactSensitivePayloads = true
+		redactSensitivePayloads.Store(true)
 	}
 	// Payload retention days via PAYLOAD_LOG_RETENTION_DAYS env var (default 7).
+	payloadLogRetentionDays.Store(7)
 	if v := os.Getenv("PAYLOAD_LOG_RETENTION_DAYS"); v != "" {
 		if days, err := strconv.Atoi(v); err == nil && days >= 0 {
-			payloadLogRetentionDays = days
+			payloadLogRetentionDays.Store(int32(days))
 		}
 	}
 	// Buffer size via LOG_BUF_SIZE env var (default 5000).
@@ -471,24 +472,25 @@ func SetupTestLogger(t testing.TB) string {
 
 // SetRedactSensitivePayloads sets whether to redact sensitive fields in logged payloads.
 func SetRedactSensitivePayloads(enable bool) {
-	redactSensitivePayloads = enable
+	redactSensitivePayloads.Store(enable)
 }
 
 // SetPayloadLogRetentionDays sets the number of days to retain payload logs.
 func SetPayloadLogRetentionDays(days int) {
 	if days >= 0 {
-		payloadLogRetentionDays = days
+		payloadLogRetentionDays.Store(int32(days))
 	}
 }
 
 // GetPayloadLogRetentionDays returns the configured retention days.
 func GetPayloadLogRetentionDays() int {
-	return payloadLogRetentionDays
+	return int(payloadLogRetentionDays.Load())
 }
 
 // CleanOldPayloadLogs deletes payload log files that are older than payloadLogRetentionDays.
 func CleanOldPayloadLogs() {
-	if payloadLogRetentionDays <= 0 {
+	retentionDays := int(payloadLogRetentionDays.Load())
+	if retentionDays <= 0 {
 		return
 	}
 	files, err := os.ReadDir(payloadsDir)
@@ -502,7 +504,7 @@ func CleanOldPayloadLogs() {
 	}
 
 	now := time.Now()
-	cutoff := now.Add(-time.Duration(payloadLogRetentionDays) * 24 * time.Hour)
+	cutoff := now.Add(-time.Duration(retentionDays) * 24 * time.Hour)
 	deletedCount := 0
 
 	for _, entry := range files {
@@ -530,7 +532,7 @@ func CleanOldPayloadLogs() {
 	}
 
 	if deletedCount > 0 {
-		Infof("[Logger] Đã xóa %d file log payload hết hạn (nhiều hơn %d ngày)", deletedCount, payloadLogRetentionDays)
+		Infof("[Logger] Đã xóa %d file log payload hết hạn (nhiều hơn %d ngày)", deletedCount, retentionDays)
 	}
 }
 
@@ -616,7 +618,7 @@ func LogPayload(reqID string, payload []byte) {
 	}
 	go func() {
 		targetPayload := payload
-		if redactSensitivePayloads {
+		if redactSensitivePayloads.Load() {
 			targetPayload = RedactPayload(payload)
 		}
 
