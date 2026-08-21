@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
-	"os"
-	"strconv"
 	"time"
 
 	"claude-proxy/internal/logger"
@@ -32,19 +30,11 @@ func (m *loggingMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Echo the ID back so callers can correlate client↔proxy↔upstream.
 	w.Header().Set("X-Request-ID", reqID)
 
-	maxBytes := int64(5 << 20) // 5 MiB default
-	if v := os.Getenv("MAX_PAYLOAD_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-			maxBytes = n
-		}
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-
 	start := time.Now()
 	lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 	m.handler.ServeHTTP(lrw, r)
 	duration := time.Since(start)
-	logger.Infof("[Yêu cầu] %s %s -> %d (%dms) req=%s", r.Method, r.URL.Path, lrw.statusCode, duration.Milliseconds(), reqID)
+	logger.Infof("[Request] %s %s -> %d (%dms) req=%s", r.Method, r.URL.Path, lrw.statusCode, duration.Milliseconds(), reqID)
 }
 
 type loggingResponseWriter struct {
