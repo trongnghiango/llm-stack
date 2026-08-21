@@ -68,7 +68,25 @@ func newCircuitBreaker(threshold int, resetTimeout time.Duration) *circuitBreake
 // In Open state, it transitions to HalfOpen after resetTimeout and allows
 // one probe; otherwise it blocks.
 func (cb *circuitBreaker) Allow() bool {
-	// Update Prometheus gauge based on state before allowing.
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	var allowed bool
+	switch cb.state {
+	case cbClosed:
+		allowed = true
+	case cbOpen:
+		if time.Since(cb.lastFailure) > cb.resetTimeout {
+			cb.state = cbHalfOpen
+			allowed = true // probe call
+		} else {
+			allowed = false
+		}
+	case cbHalfOpen:
+		allowed = false // only one probe at a time
+	}
+
+	// Update Prometheus gauge based on current state (inside lock to prevent data race).
 	// 0=closed, 1=open, 2=half-open
 	switch cb.state {
 	case cbClosed:
@@ -79,21 +97,7 @@ func (cb *circuitBreaker) Allow() bool {
 		metrics.CircuitBreakerState.Set(2)
 	}
 
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	switch cb.state {
-	case cbClosed:
-		return true
-	case cbOpen:
-		if time.Since(cb.lastFailure) > cb.resetTimeout {
-			cb.state = cbHalfOpen
-			return true // probe call
-		}
-		return false
-	case cbHalfOpen:
-		return false // only one probe at a time
-	}
-	return false
+	return allowed
 }
 
 // RecordSuccess resets the circuit breaker to Closed state.
