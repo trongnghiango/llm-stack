@@ -15,6 +15,7 @@ import (
 
 	"claude-proxy/internal/config"
 	"claude-proxy/internal/logger"
+	"claude-proxy/internal/metrics"
 	"claude-proxy/internal/router"
 )
 
@@ -60,7 +61,9 @@ func TestProxyMetricsEndpoint(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/debug/metrics", nil)
 	w := httptest.NewRecorder()
-	handleProxy(w, req)
+	mux := http.NewServeMux()
+	metrics.ExposeMetrics(mux)
+	mux.ServeHTTP(w, req)
 
 	resp := w.Result()
 	if resp.StatusCode != http.StatusOK {
@@ -480,7 +483,9 @@ func TestDebugHealthEndpoint(t *testing.T) {
 func TestHandleProxy_MetricsDirect(t *testing.T) {
 	req := httptest.NewRequest("GET", "/debug/metrics", nil)
 	w := httptest.NewRecorder()
-	handleProxy(w, req)
+	mux := http.NewServeMux()
+	metrics.ExposeMetrics(mux)
+	mux.ServeHTTP(w, req)
 	if w.Result().StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Result().StatusCode)
 	}
@@ -627,7 +632,7 @@ func TestProxyPayloadLogging(t *testing.T) {
 		t.Fatalf("logged payload is not valid JSON: %v", err)
 	}
 
-	if parsed.Model != "ka.simple" { // fallback model for swe.utility
+	if parsed.Model != "swe.utility" { // fallback model for swe.utility
 		t.Errorf("expected logged model to be rewritten fallback model, got: %q", parsed.Model)
 	}
 

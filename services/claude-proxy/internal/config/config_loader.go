@@ -96,7 +96,7 @@ func (j *JSONConfigLoader) Load() (Config, error) {
 	if val := os.Getenv("REDIS_URL"); val != "" {
 		cfg.RedisURL = val
 	}
-	
+
 	// Environment variable overrides for UpstreamAPIKey (P0 Audit fix)
 	if val := os.Getenv("UPSTREAM_API_KEY"); val != "" {
 		cfg.UpstreamAPIKey = val

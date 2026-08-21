@@ -46,7 +46,7 @@ func TestEmitSpoofedAnthropicStream_WithTool(t *testing.T) {
 	rec := httptest.NewRecorder()
 	input := `<tools>{"name": "Write", "arguments": {"file_path": "/temp.md", "content": "hello\n"}}</tools>`
 
-	emitSpoofedAnthropicStream(rec, input)
+	emitSpoofedAnthropicStream(rec, input, nil)
 	body := rec.Body.String()
 
 	if !strings.Contains(body, "event: message_start") {
@@ -77,7 +77,7 @@ func TestEmitSpoofedAnthropicStream_WithMarkdownAndText(t *testing.T) {
 	rec := httptest.NewRecorder()
 	input := "Tôi sẽ tạo file.\n<tools>\n```json\n{\"name\": \"Write\", \"arguments\": {\"file_path\": \"/temp.md\", \"content\": \"hello\"}}\n```\n</tools>"
 
-	emitSpoofedAnthropicStream(rec, input)
+	emitSpoofedAnthropicStream(rec, input, nil)
 	body := rec.Body.String()
 
 	if !strings.Contains(body, "Tôi sẽ tạo file.") {
@@ -108,7 +108,7 @@ func TestEmitSpoofedAnthropicStream_RawJSON(t *testing.T) {
     }
   }`
 
-	emitSpoofedAnthropicStream(rec, input)
+	emitSpoofedAnthropicStream(rec, input, nil)
 	body := rec.Body.String()
 
 	if !strings.Contains(body, `"type":"tool_use"`) {
@@ -126,7 +126,7 @@ func TestEmitSpoofedAnthropicStream_SpecialTokens(t *testing.T) {
 	rec := httptest.NewRecorder()
 	input := `<|start|>assistant<|channel|>commentary to=tool.run <|constrain|>json<|message|>{"name":"Read","arguments":{"file_path":"/home/ka/test.vtt"}}<|call|>`
 
-	emitSpoofedAnthropicStream(rec, input)
+	emitSpoofedAnthropicStream(rec, input, nil)
 	body := rec.Body.String()
 
 	if !strings.Contains(body, `"type":"tool_use"`) {
@@ -147,7 +147,7 @@ func TestEmitSpoofedAnthropicStream_NoTool(t *testing.T) {
 	rec := httptest.NewRecorder()
 	input := "Xin chào, tôi là trợ lý AI."
 
-	emitSpoofedAnthropicStream(rec, input)
+	emitSpoofedAnthropicStream(rec, input, nil)
 	body := rec.Body.String()
 
 	if !strings.Contains(body, "Xin chào, tôi là trợ lý AI.") {
@@ -205,7 +205,7 @@ func TestEmitSpoofedAnthropicStream_WithRawNewlinesInJSON(t *testing.T) {
 	// Raw literal newline inside the description string
 	input := "Tôi sẽ review code.\n<tools>{\"name\": \"Agent\", \"arguments\": {\"description\": \"Review code\nLine 2\", \"prompt\": \"Task details\"}}</tools>"
 
-	emitSpoofedAnthropicStream(rec, input)
+	emitSpoofedAnthropicStream(rec, input, nil)
 	body := rec.Body.String()
 
 	if !strings.Contains(body, `"name":"Agent"`) {

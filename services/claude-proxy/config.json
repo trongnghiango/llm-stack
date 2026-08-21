@@ -1,11 +1,10 @@
 {
   "_description": "Multi-LLM SWE Protocol — Proxy Configuration",
   "_claude_code_model_map": {
-    "ANTHROPIC_DEFAULT_OPUS_MODEL":   "swe.architect  → ka.reason",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "swe.engineer   → ka.base  (default)",
-    "CLAUDE_CODE_SUBAGENT_MODEL":     "swe.subagent   → ka.base",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL":  "swe.utility    → ka.simple | ka.docs",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION":  "swe.knowledge  → ka.docs"
+    "ANTHROPIC_DEFAULT_OPUS_MODEL":   "claude-opus-5               → ka.reason",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5             → ka.base  (default)",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL":  "claude-haiku-4-5-20251001 → ka.simple | ka.docs",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION":  "claude-fable-5              → ka.docs"
   },
 
   "upstream_url": "http://9router:20128",
@@ -31,7 +30,6 @@
       "target_model": "ka.base",
       "description": "Engineer → Gemini Flash Agent"
     },
-
     {
       "_group": "Tier 2 — Subagent (parallel tasks, same tier as engineer)",
       "trigger_model": "claude-sonnet-5",

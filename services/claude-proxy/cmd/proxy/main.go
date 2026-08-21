@@ -48,6 +48,19 @@ func cleanPromptForRouting(s string) string {
 // ─────────────────────────────────────────────
 // HTTP proxy handler
 // ─────────────────────────────────────────────
+func ModelsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{
+		"data": [
+			{"id": "swe.architect", "type": "model", "display_name": "SWE Architect", "created_at": "2024-01-01T00:00:00Z"},
+			{"id": "swe.engineer", "type": "model", "display_name": "SWE Engineer", "created_at": "2024-01-01T00:00:00Z"},
+			{"id": "swe.subagent", "type": "model", "display_name": "SWE Subagent", "created_at": "2024-01-01T00:00:00Z"},
+			{"id": "swe.utility", "type": "model", "display_name": "SWE Utility", "created_at": "2024-01-01T00:00:00Z"},
+			{"id": "swe.knowledge", "type": "model", "display_name": "SWE Knowledge", "created_at": "2024-01-01T00:00:00Z"}
+		]
+	}`))
+}
 
 func handleProxy(w http.ResponseWriter, r *http.Request) {
 	defer func() {
@@ -56,8 +69,6 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal Proxy Server Recovery Error", http.StatusInternalServerError)
 		}
 	}()
-
-
 
 	// ── 1. Read and size-limit the request body ──────────────────────────────
 	maxBytes := defaultMaxPayload
@@ -85,7 +96,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	if len(bodyBytes) == 0 {
-		forwardRequest(w, r, bodyBytes, false, false)
+		forwardRequest(w, r, bodyBytes, false, false, false, nil)
 		return
 	}
 
@@ -95,7 +106,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/messages" {
 			logger.Errorf("[Proxy] Malformed JSON on /v1/messages: %v", err)
 		}
-		forwardRequest(w, r, bodyBytes, false, false)
+		forwardRequest(w, r, bodyBytes, false, false, false, nil)
 		return
 	}
 
@@ -104,18 +115,21 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	if modelBytes, ok := rawData["model"]; ok {
 		if err := json.Unmarshal(modelBytes, &originalModel); err != nil {
 			logger.Errorf("[Router] Cannot parse model field: %v", err)
-			forwardRequest(w, r, bodyBytes, false, false)
+			forwardRequest(w, r, bodyBytes, false, false, false, nil)
 			return
 		}
 	} else {
-		forwardRequest(w, r, bodyBytes, false, false)
+		forwardRequest(w, r, bodyBytes, false, false, false, nil)
 		return
 	}
 
 	// Warn on unrecognised proxy-configured models.
-	if strings.HasPrefix(originalModel, "claude-") || strings.HasPrefix(originalModel, "swe.") {
+	if strings.HasPrefix(originalModel, "claude-") || strings.HasPrefix(originalModel, "ka.") {
 		st := router.GetState()
-		if _, known := st.SemanticRuleMap[originalModel]; !known {
+		_, knownInSemantic := st.SemanticRuleMap[originalModel]
+		_, knownInSettings := st.ModelSettingsMap[originalModel]
+
+		if !knownInSemantic && !knownInSettings {
 			logger.Errorf("[Security] Unrecognised routed model: %s", originalModel)
 			metrics.InvalidModelTotal.Inc()
 		}
@@ -135,13 +149,21 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// ── 6. Tool spoofing (XML injection for OSS models) ──────────────────────
 	isSpoofingTools := hasSettings && modelSettings.SpoofToolsXML && len(textReq.Tools) > 0
+	var requestedTools []AnthropicTool
+	if isSpoofingTools {
+		if err := json.Unmarshal(textReq.Tools, &requestedTools); err != nil {
+			logger.Errorf("[Router] Failed to parse tools for spoofing: %v", err)
+			isSpoofingTools = false
+		}
+	}
+
 	if isSpoofingTools {
 		convertedMsgs := convertMessagesForSpoofing(textReq.Messages)
 		msgsBytes, _ := json.Marshal(convertedMsgs)
 		rawData["messages"] = msgsBytes
 
 		logger.Infof("[Router] Spoofing Tools -> XML for model: %s", targetModel)
-		systemStr := buildSpoofedSystemPrompt(textReq.System, textReq.Tools)
+		systemStr := buildSpoofedSystemPrompt(textReq.System, requestedTools)
 		sysBytes, _ := json.Marshal(systemStr)
 		rawData["system"] = sysBytes
 
@@ -160,8 +182,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	logger.LogPayload(reqID, modifiedBody)
 
-	isFakeStream := hasSettings && modelSettings.FakeStream && textReq.Stream != nil && *textReq.Stream
-	forwardRequest(w, r, modifiedBody, isSpoofingTools, isFakeStream)
+	isClientStream := textReq.Stream != nil && *textReq.Stream
+	isFakeStream := hasSettings && modelSettings.FakeStream && isClientStream
+	forwardRequest(w, r, modifiedBody, isSpoofingTools, isFakeStream, isClientStream, requestedTools)
 }
 
 // extractPromptText concatenates text from all user-role messages for routing.
@@ -180,7 +203,7 @@ func extractPromptText(messages []Message) string {
 		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
 			for _, b := range blocks {
 				if b.Type == "text" {
-				sb.WriteString(" " + cleanPromptForRouting(b.Text))
+					sb.WriteString(" " + cleanPromptForRouting(b.Text))
 				}
 			}
 		}
@@ -192,7 +215,7 @@ func extractPromptText(messages []Message) string {
 // Upstream forwarding
 // ─────────────────────────────────────────────
 
-func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte, isSpoofingTools, isFakeStream bool) {
+func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte, isSpoofingTools, isFakeStream, isClientStream bool, requestedTools []AnthropicTool) {
 	s := router.GetState()
 	upstreamURL, err := url.Parse(s.Config.UpstreamURL)
 	if err != nil {
@@ -250,7 +273,11 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte, isSp
 			fullText = extractTextFromJSON(bodyBytes)
 		}
 		logger.Infof("[Spoof-Stream] Extracted %d chars: %.200s", len(fullText), fullText)
-		writeSseBody(w, fullText)
+		if isClientStream {
+			writeSseBody(w, fullText, requestedTools)
+		} else {
+			writeJsonBody(w, fullText, requestedTools)
+		}
 		return
 	}
 
@@ -260,7 +287,7 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte, isSp
 		if !ok {
 			return
 		}
-		writeSseBody(w, extractTextFromJSON(bodyBytes))
+		writeSseBody(w, extractTextFromJSON(bodyBytes), nil)
 		return
 	}
 
@@ -273,10 +300,16 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, payload []byte, isSp
 		return
 	}
 
-	// Case 4 — Transparent non-streaming response.
-	logger.Infof("[Response] -> raw copy path")
+	// Case 4 — Transparent non-streaming response: convert OpenAI→Anthropic.
+	logger.Infof("[Response] -> non-streaming path, converting if needed")
+	bodyBytes, ok := readBodyOrError(w, resp, "NonStream")
+	if !ok {
+		return
+	}
+	converted := convertToAnthropicJSON(bodyBytes)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = w.Write(converted)
 }
 
 // ─────────────────────────────────────────────
@@ -307,6 +340,7 @@ func main() {
 	mux.HandleFunc("/health", HealthHandler)
 	mux.HandleFunc("/readyz", ReadyzHandler)
 	mux.HandleFunc("/debug/health", DebugHealthHandler)
+	mux.HandleFunc("/v1/models", ModelsHandler)
 	mux.HandleFunc("/", handleProxy)
 
 	var handler http.Handler = mux
