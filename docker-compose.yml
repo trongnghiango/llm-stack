@@ -79,6 +79,7 @@ services:
       # Mount toàn bộ data dir (SQLite DB, logs, auth...)
       - ./data/9router:/app/data
       - ./config/nim_accounts.csv:/app/NIM_accounts.csv:ro
+      - ./services/9router/custom-server.js:/app/custom-server.js:ro
     environment:
       - TZ=${TZ:-Asia/Ho_Chi_Minh}
       - PORT=20128
