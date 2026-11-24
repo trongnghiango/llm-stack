@@ -268,3 +268,9 @@ Hệ thống đã được cấu hình mặc định timeout **600 giây (10 ph�
 #### 3. Cần Đăng Nhập Dashboard Admin
 Truy cập trình duyệt: **`http://localhost:20128`**
 * Mật khẩu mặc định: `llmstack2026` (hoặc giá trị bạn đặt trong biến `INITIAL_PASSWORD` tại file `.env`).
+
+#### 4. Model `ag/gemini-*` Bị 429 / "all accounts locked"
+Google trả `429 RESOURCE_EXHAUSTED` phía upstream; 9router lại tự retry 3 lần và **tự khoá model 15 phút** (`CACHE_BLOCK`) sau 3 lần 429 trong 60 giây.
+
+* Runbook + patch đã áp dụng: **[9ROUTER_ANTIGRAVITY_429.md](9ROUTER_ANTIGRAVITY_429.md)**
+* Kiểm tra nhanh: `docker logs llm-9router --tail 50 | grep -E "429|AG_QUOTA|STRIKE"`

@@ -54,3 +54,6 @@ Thumbs.db
 
 # 7. Submodules / Vendor
 services/omniroute/
+
+# 8. Patch runtime bind-mounts (chuyển sang server bằng tar, không commit)
+patch/

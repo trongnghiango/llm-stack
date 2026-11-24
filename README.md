@@ -103,3 +103,6 @@ Cấu hình các slot model trong `~/.claude/settings.json`:
 
 Xem hướng dẫn chi tiết từng bước cho từng hệ điều hành tại:
 👉 **[Tài Liệu Hướng Dẫn Triển Khai Toàn Diện (DEPLOYMENT_GUIDE.md)](docs/DEPLOYMENT_GUIDE.md)**
+
+Sự cố `ag/*` bị 429 / khoá 15 phút và patch retry đã áp dụng:
+👉 **[9router × Antigravity (429 & Runbook patch)](docs/9ROUTER_ANTIGRAVITY_429.md)**

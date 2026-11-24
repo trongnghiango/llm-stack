@@ -35,20 +35,25 @@ if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_EXAMPLE" ]; then
     JWT_SEC=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
     API_SEC=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 
-    python3 -c "
-with open('$ENV_FILE', 'r') as f:
+    JWT_SEC="$JWT_SEC" API_SEC="$API_SEC" ENV_FILE="$ENV_FILE" python3 -c "
+import os
+jwt_sec = os.environ['JWT_SEC']
+api_sec = os.environ['API_SEC']
+env_file = os.environ['ENV_FILE']
+
+with open(env_file, 'r') as f:
     lines = f.readlines()
 
 new_lines = []
 for line in lines:
     if line.startswith('JWT_SECRET='):
-        new_lines.append(f'JWT_SECRET={JWT_SEC}\n')
+        new_lines.append(f'JWT_SECRET={jwt_sec}\n')
     elif line.startswith('API_KEY_SECRET='):
-        new_lines.append(f'API_KEY_SECRET={API_SEC}\n')
+        new_lines.append(f'API_KEY_SECRET={api_sec}\n')
     else:
         new_lines.append(line)
 
-with open('$ENV_FILE', 'w') as f:
+with open(env_file, 'w') as f:
     f.writelines(new_lines)
 "
   elif hash openssl 2>/dev/null; then

@@ -80,12 +80,17 @@ services:
       - ./data/9router:/app/data
       - ./config/nim_accounts.csv:/app/NIM_accounts.csv:ro
       - ./services/9router/custom-server.js:/app/custom-server.js:ro
+      # Patch: giảm retry 429 (3→2) để không tự kích hoạt CACHE_BLOCK 15 phút
+      - ./patch/antigravity.js:/app/open-sse/providers/registry/antigravity.js:ro
     environment:
       - TZ=${TZ:-Asia/Ho_Chi_Minh}
       - PORT=20128
       - HOSTNAME=0.0.0.0
       - DATA_DIR=/app/data
       - NODE_ENV=production
+      - INITIAL_PASSWORD=${INITIAL_PASSWORD:-llmstack2026}
+      - JWT_SECRET=${JWT_SECRET}
+      - API_KEY_SECRET=${API_KEY_SECRET}
     depends_on:
       cf-ai-proxy:
         condition: service_started
