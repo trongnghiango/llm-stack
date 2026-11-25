@@ -24,11 +24,17 @@ services:
     networks:
       - llm-net
     command: redis-server --appendonly yes --loglevel warning
+    mem_limit: 256m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ---------------------------------------------------------------------------
   # cf-ai-proxy – Chuyển đổi Anthropic ↔ Cloudflare Workers AI format
@@ -57,12 +63,18 @@ services:
       - llm-net
     ports:
       - "127.0.0.1:20127:20127"
+    mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:20127/health 2>/dev/null || exit 0"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ---------------------------------------------------------------------------
   # 9router – LLM Router / Load Balancer
@@ -74,7 +86,8 @@ services:
     container_name: llm-9router
     restart: unless-stopped
     ports:
-      - "20128:20128"          # Expose để truy cập UI admin từ host
+      - "127.0.0.1:20128:20128"   # Chỉ localhost; ra ngoài đi qua cloudflared tunnel
+    mem_limit: 1g
     volumes:
       # Mount toàn bộ data dir (SQLite DB, logs, auth...)
       - ./data/9router:/app/data
@@ -99,6 +112,11 @@ services:
     extra_hosts:
       # Giữ host.docker.internal để nếu cần thêm provider trỏ về host
       - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ---------------------------------------------------------------------------
   # claude-proxy – Model name rewriter
@@ -112,6 +130,7 @@ services:
     image: llm-claude-proxy:latest
     container_name: llm-claude-proxy
     restart: unless-stopped
+    profiles: ["local-claude"]   # Mặc định TẮT (server chỉ chạy local khi cần)
     ports:
       - "127.0.0.1:20129:20129"   # Chỉ bind localhost – Claude Code dùng
     environment:
@@ -134,6 +153,33 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # cloudflared – Tunnel riêng "hn-llm" (dashboard-managed) → 9router:20128
+  # Không publish port; TUNNEL_TOKEN nằm trong .env (chmod 600).
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: llm-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
+      - TZ=${TZ:-Asia/Ho_Chi_Minh}
+    depends_on:
+      - 9router
+    networks:
+      - llm-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 # =============================================================================
 networks:
